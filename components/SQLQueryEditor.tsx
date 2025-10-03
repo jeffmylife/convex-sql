@@ -55,7 +55,7 @@ export function SQLQueryEditor() {
   const error = response?.success === false ? response.error : null;
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-6xl mx-auto">
+    <div className="flex flex-col gap-6 w-full">
       <div className="flex gap-2 items-center justify-between">
         <div className="flex gap-2">
           <Button
