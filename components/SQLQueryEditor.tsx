@@ -21,11 +21,14 @@ import {
 } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Play, Database, Trash2, AlertCircle, Loader2, Radio } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Play, Database, Trash2, AlertCircle, Loader2, Radio, Zap } from "lucide-react";
 import Editor from "react-simple-code-editor";
 import Prism from "prismjs";
 import "prismjs/components/prism-sql";
 import "prismjs/themes/prism-tomorrow.css";
+import { Lexer } from "@/convex/sql/lexer";
+import { Parser } from "@/convex/sql/parser";
 
 const EXAMPLE_QUERIES = [
   "SELECT * FROM users",
@@ -40,12 +43,29 @@ export function SQLQueryEditor() {
   const [executedQuery, setExecutedQuery] = useState(EXAMPLE_QUERIES[0]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [changedRows, setChangedRows] = useState<Set<number>>(new Set());
+  const [autoExecute, setAutoExecute] = useState(false);
+  const [isValidSyntax, setIsValidSyntax] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const previousResults = useRef<any[] | null>(null);
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   const seedDatabase = useMutation(api.seedData.seedDatabase);
   const clearDatabase = useMutation(api.seedData.clearDatabase);
 
   const response = useQuery(api.sqlQueries.runSQL, { sql: executedQuery });
+
+  // Validate SQL syntax
+  const validateSQL = (query: string): boolean => {
+    try {
+      const lexer = new Lexer(query);
+      const tokens = lexer.tokenize();
+      const parser = new Parser(tokens);
+      parser.parse();
+      return true;
+    } catch (error) {
+      return false;
+    }
+  };
 
   const handleExecute = () => {
     setExecutedQuery(sql);
@@ -53,8 +73,42 @@ export function SQLQueryEditor() {
     setChangedRows(new Set());
   };
 
+  // Auto-execute effect with debouncing
+  useEffect(() => {
+    if (!autoExecute) {
+      // Clear any pending timers if auto-execute is disabled
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+      return;
+    }
+
+    // Validate syntax
+    const isValid = validateSQL(sql);
+    setIsValidSyntax(isValid);
+
+    if (!isValid) return;
+
+    // Debounce the execution
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+
+    debounceTimer.current = setTimeout(() => {
+      setExecutedQuery(sql);
+      previousResults.current = null; // Reset tracking on new query
+      setChangedRows(new Set());
+    }, 500); // 500ms debounce
+
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
+  }, [sql, autoExecute]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !autoExecute) {
       e.preventDefault();
       handleExecute();
     }
@@ -62,6 +116,11 @@ export function SQLQueryEditor() {
 
   const results = response?.success ? response.data : null;
   const error = response?.success === false ? response.error : null;
+
+  // Set mounted state to prevent hydration mismatch
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Track changes in results
   useEffect(() => {
@@ -119,31 +178,60 @@ export function SQLQueryEditor() {
       <div className="flex flex-col gap-4 border rounded-lg p-6 bg-[var(--color-card)] shadow-sm">
         <div className="flex items-center justify-between">
           <label className="text-sm font-semibold">SQL Query</label>
-          <Badge variant="outline" className="font-mono text-[10px]">
-            READ-ONLY
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="font-mono text-[10px]">
+              READ-ONLY
+            </Badge>
+            {autoExecute && !isValidSyntax && (
+              <Badge variant="destructive" className="text-[10px]">
+                Invalid Syntax
+              </Badge>
+            )}
+          </div>
         </div>
         <div
-          className="border rounded-md bg-[var(--color-muted)]/30 border-[var(--color-muted-foreground)]/20 overflow-hidden"
+          className={`border rounded-md bg-[var(--color-muted)]/30 overflow-hidden transition-all ${
+            autoExecute
+              ? "border-[var(--color-primary)] shadow-sm shadow-[var(--color-primary)]/20"
+              : "border-[var(--color-muted-foreground)]/20"
+          }`}
           onKeyDown={handleKeyDown}
         >
-          <Editor
-            value={sql}
-            onValueChange={setSql}
-            highlight={(code) => Prism.highlight(code, Prism.languages.sql, "sql")}
-            padding={12}
-            style={{
-              fontFamily: "var(--font-geist-mono), monospace",
-              fontSize: 14,
-              minHeight: "140px",
-              backgroundColor: "transparent",
-            }}
-            textareaClassName="focus:outline-none"
-            placeholder="SELECT * FROM users WHERE age > 18"
-          />
+          {mounted ? (
+            <Editor
+              value={sql}
+              onValueChange={setSql}
+              highlight={(code) => Prism.highlight(code, Prism.languages.sql, "sql")}
+              padding={12}
+              style={{
+                fontFamily: "var(--font-geist-mono), monospace",
+                fontSize: 14,
+                minHeight: "140px",
+                backgroundColor: "transparent",
+              }}
+              textareaClassName="focus:outline-none"
+              placeholder="SELECT * FROM users WHERE age > 18"
+            />
+          ) : (
+            <div
+              style={{
+                fontFamily: "var(--font-geist-mono), monospace",
+                fontSize: 14,
+                minHeight: "140px",
+                padding: 12,
+                color: "var(--color-foreground)",
+              }}
+            >
+              {sql}
+            </div>
+          )}
         </div>
         <div className="flex gap-2 items-center">
-          <Button onClick={handleExecute} size="default">
+          <Button
+            onClick={handleExecute}
+            size="default"
+            disabled={autoExecute}
+          >
             <Play className="mr-2 h-4 w-4" />
             Execute Query
           </Button>
@@ -159,10 +247,26 @@ export function SQLQueryEditor() {
               ))}
             </SelectContent>
           </Select>
-          <div className="ml-auto">
-            <Badge variant="secondary" className="font-mono text-[10px]">
-              <span className="text-xs mr-1">⌘</span>+ Enter
-            </Badge>
+          <div className="ml-auto flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="auto-execute"
+                checked={autoExecute}
+                onCheckedChange={setAutoExecute}
+              />
+              <label
+                htmlFor="auto-execute"
+                className="text-sm font-medium cursor-pointer flex items-center gap-1"
+              >
+                <Zap className={`h-4 w-4 ${autoExecute ? "text-[var(--color-primary)]" : ""}`} />
+                Auto-execute
+              </label>
+            </div>
+            {!autoExecute && (
+              <Badge variant="secondary" className="font-mono text-[10px]">
+                <span className="text-xs mr-1">⌘</span>+ Enter
+              </Badge>
+            )}
           </div>
         </div>
       </div>
@@ -175,6 +279,12 @@ export function SQLQueryEditor() {
               <Badge variant="default" className="animate-pulse bg-[var(--color-primary)]">
                 <Radio className="h-3 w-3 mr-1" />
                 LIVE
+              </Badge>
+            )}
+            {autoExecute && (
+              <Badge variant="secondary" className="bg-[var(--color-accent)]/30 border-[var(--color-accent)]">
+                <Zap className="h-3 w-3 mr-1" />
+                Auto-execute ON
               </Badge>
             )}
           </div>
