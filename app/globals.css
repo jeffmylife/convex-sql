@@ -93,4 +93,17 @@
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
   }
+
+  @keyframes highlight {
+    0% {
+      background-color: hsl(var(--accent));
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+
+  .animate-highlight {
+    animation: highlight 2s ease-out;
+  }
 }

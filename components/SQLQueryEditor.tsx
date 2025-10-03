@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Play, Database, Trash2, AlertCircle, Loader2 } from "lucide-react";
+import { Play, Database, Trash2, AlertCircle, Loader2, Radio } from "lucide-react";
 
 const EXAMPLE_QUERIES = [
   "SELECT * FROM users",
@@ -35,6 +35,10 @@ const EXAMPLE_QUERIES = [
 export function SQLQueryEditor() {
   const [sql, setSql] = useState(EXAMPLE_QUERIES[0]);
   const [executedQuery, setExecutedQuery] = useState(EXAMPLE_QUERIES[0]);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [changedRows, setChangedRows] = useState<Set<number>>(new Set());
+  const previousResults = useRef<any[] | null>(null);
+
   const seedDatabase = useMutation(api.seedData.seedDatabase);
   const clearDatabase = useMutation(api.seedData.clearDatabase);
 
@@ -42,6 +46,8 @@ export function SQLQueryEditor() {
 
   const handleExecute = () => {
     setExecutedQuery(sql);
+    previousResults.current = null; // Reset tracking on new query
+    setChangedRows(new Set());
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -53,6 +59,36 @@ export function SQLQueryEditor() {
 
   const results = response?.success ? response.data : null;
   const error = response?.success === false ? response.error : null;
+
+  // Track changes in results
+  useEffect(() => {
+    if (results && results.length > 0) {
+      setLastUpdated(new Date());
+
+      if (previousResults.current) {
+        const newChangedRows = new Set<number>();
+        const prevResultsStr = JSON.stringify(previousResults.current);
+        const currentResultsStr = JSON.stringify(results);
+
+        if (prevResultsStr !== currentResultsStr) {
+          // Detect which rows changed
+          results.forEach((row, idx) => {
+            const prevRow = previousResults.current?.[idx];
+            if (!prevRow || JSON.stringify(prevRow) !== JSON.stringify(row)) {
+              newChangedRows.add(idx);
+            }
+          });
+
+          setChangedRows(newChangedRows);
+
+          // Clear highlights after animation
+          setTimeout(() => setChangedRows(new Set()), 2000);
+        }
+      }
+
+      previousResults.current = results;
+    }
+  }, [results]);
 
   return (
     <div className="flex flex-col gap-6 w-full">
@@ -118,12 +154,27 @@ export function SQLQueryEditor() {
 
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <label className="text-sm font-semibold">Results</label>
-          {results && (
-            <Badge variant="outline">
-              {results.length} row{results.length !== 1 ? "s" : ""}
-            </Badge>
-          )}
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-semibold">Results</label>
+            {results && results.length > 0 && (
+              <Badge variant="default" className="animate-pulse bg-[var(--color-primary)]">
+                <Radio className="h-3 w-3 mr-1" />
+                LIVE
+              </Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {lastUpdated && (
+              <span className="text-xs text-[var(--color-muted-foreground)]">
+                Updated {lastUpdated.toLocaleTimeString()}
+              </span>
+            )}
+            {results && (
+              <Badge variant="outline">
+                {results.length} row{results.length !== 1 ? "s" : ""}
+              </Badge>
+            )}
+          </div>
         </div>
         {response === undefined ? (
           <div className="flex items-center justify-center p-16 border rounded-lg bg-[var(--color-card)] shadow-sm">
@@ -151,8 +202,16 @@ export function SQLQueryEditor() {
             </p>
           </div>
         ) : results && results.length > 0 ? (
-          <div className="rounded-lg border bg-[var(--color-card)] shadow-sm overflow-hidden">
-            <div className="max-h-[500px] overflow-auto">
+          <div className="space-y-3">
+            <Alert className="bg-[var(--color-accent)]/20 border-[var(--color-accent)]/40">
+              <Radio className="h-4 w-4" />
+              <AlertTitle>Real-time Results</AlertTitle>
+              <AlertDescription className="text-xs">
+                These results update automatically as your database changes. Changed rows will flash briefly.
+              </AlertDescription>
+            </Alert>
+            <div className="rounded-lg border bg-[var(--color-card)] shadow-sm overflow-hidden">
+              <div className="max-h-[500px] overflow-auto">
               <Table>
                 <TableHeader className="sticky top-0 bg-[var(--color-muted)] backdrop-blur-sm border-b">
                   <TableRow className="hover:bg-[var(--color-muted)]">
@@ -165,7 +224,10 @@ export function SQLQueryEditor() {
                 </TableHeader>
                 <TableBody>
                   {results.map((row, i) => (
-                    <TableRow key={i}>
+                    <TableRow
+                      key={i}
+                      className={changedRows.has(i) ? "animate-highlight" : ""}
+                    >
                       {Object.values(row).map((value, j) => (
                         <TableCell key={j} className="font-mono text-xs">
                           {typeof value === "boolean" ? (
@@ -184,6 +246,7 @@ export function SQLQueryEditor() {
                 </TableBody>
               </Table>
             </div>
+          </div>
           </div>
         ) : null}
       </div>
