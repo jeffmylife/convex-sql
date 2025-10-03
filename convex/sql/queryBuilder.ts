@@ -1,5 +1,5 @@
 import { GenericQueryCtx } from "convex/server";
-import { SelectStatement, WhereClause } from "./types";
+import { SelectStatement, WhereClause } from "../../lib/sql/types";
 import { GenericDataModel, TableNamesInDataModel } from "convex/server";
 
 export async function executeSelect<DataModel extends GenericDataModel>(

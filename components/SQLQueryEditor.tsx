@@ -27,8 +27,8 @@ import Editor from "react-simple-code-editor";
 import Prism from "prismjs";
 import "prismjs/components/prism-sql";
 import "prismjs/themes/prism-tomorrow.css";
-import { Lexer } from "@/convex/sql/lexer";
-import { Parser } from "@/convex/sql/parser";
+import { Lexer } from "@/lib/sql/lexer";
+import { Parser } from "@/lib/sql/parser";
 
 const EXAMPLE_QUERIES = [
   "SELECT * FROM users",

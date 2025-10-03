@@ -1,7 +1,7 @@
 import { GenericQueryCtx } from "convex/server";
 import { GenericDataModel } from "convex/server";
-import { Lexer } from "./lexer";
-import { Parser } from "./parser";
+import { Lexer } from "../../lib/sql/lexer";
+import { Parser } from "../../lib/sql/parser";
 import { executeSelect } from "./queryBuilder";
 
 /**
@@ -32,7 +32,3 @@ export async function executeSQL<DataModel extends GenericDataModel>(
   // Execute
   return await executeSelect(ctx, ast);
 }
-
-export { Lexer } from "./lexer";
-export { Parser } from "./parser";
-export * from "./types";

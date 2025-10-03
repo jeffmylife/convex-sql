@@ -15,10 +15,7 @@ import type {
 } from "convex/server";
 import type * as seedData from "../seedData.js";
 import type * as sql_index from "../sql/index.js";
-import type * as sql_lexer from "../sql/lexer.js";
-import type * as sql_parser from "../sql/parser.js";
 import type * as sql_queryBuilder from "../sql/queryBuilder.js";
-import type * as sql_types from "../sql/types.js";
 import type * as sqlQueries from "../sqlQueries.js";
 
 /**
@@ -32,10 +29,7 @@ import type * as sqlQueries from "../sqlQueries.js";
 declare const fullApi: ApiFromModules<{
   seedData: typeof seedData;
   "sql/index": typeof sql_index;
-  "sql/lexer": typeof sql_lexer;
-  "sql/parser": typeof sql_parser;
   "sql/queryBuilder": typeof sql_queryBuilder;
-  "sql/types": typeof sql_types;
   sqlQueries: typeof sqlQueries;
 }>;
 export declare const api: FilterApi<
