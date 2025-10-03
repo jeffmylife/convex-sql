@@ -4,6 +4,7 @@ export type SelectStatement = {
   type: "SELECT";
   columns: ColumnExpression[];
   from: string;
+  fromIndex?: string; // Index for the main table
   joins?: JoinClause[];
   where?: WhereClause;
   orderBy?: OrderByClause[];
@@ -13,6 +14,7 @@ export type SelectStatement = {
 export type JoinClause = {
   type: "INNER";
   table: string;
+  index?: string; // Index for this joined table
   on: JoinCondition;
 };
 

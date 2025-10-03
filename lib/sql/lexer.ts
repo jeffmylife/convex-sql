@@ -38,37 +38,80 @@ export class Lexer {
         this.tokens.push({ type: "STAR", value: "*", position: this.position });
         this.position++;
       } else if (char === ",") {
-        this.tokens.push({ type: "COMMA", value: ",", position: this.position });
+        this.tokens.push({
+          type: "COMMA",
+          value: ",",
+          position: this.position,
+        });
         this.position++;
       } else if (char === ".") {
         this.tokens.push({ type: "DOT", value: ".", position: this.position });
         this.position++;
       } else if (char === "(") {
-        this.tokens.push({ type: "LPAREN", value: "(", position: this.position });
+        this.tokens.push({
+          type: "LPAREN",
+          value: "(",
+          position: this.position,
+        });
         this.position++;
       } else if (char === ")") {
-        this.tokens.push({ type: "RPAREN", value: ")", position: this.position });
+        this.tokens.push({
+          type: "RPAREN",
+          value: ")",
+          position: this.position,
+        });
+        this.position++;
+      } else if (char === "@") {
+        this.tokens.push({
+          type: "AT",
+          value: "@",
+          position: this.position,
+        });
         this.position++;
       } else if (char === "=") {
-        this.tokens.push({ type: "OPERATOR", value: "=", position: this.position });
+        this.tokens.push({
+          type: "OPERATOR",
+          value: "=",
+          position: this.position,
+        });
         this.position++;
       } else if (char === "!" && this.peek() === "=") {
-        this.tokens.push({ type: "OPERATOR", value: "!=", position: this.position });
+        this.tokens.push({
+          type: "OPERATOR",
+          value: "!=",
+          position: this.position,
+        });
         this.position += 2;
       } else if (char === ">") {
         if (this.peek() === "=") {
-          this.tokens.push({ type: "OPERATOR", value: ">=", position: this.position });
+          this.tokens.push({
+            type: "OPERATOR",
+            value: ">=",
+            position: this.position,
+          });
           this.position += 2;
         } else {
-          this.tokens.push({ type: "OPERATOR", value: ">", position: this.position });
+          this.tokens.push({
+            type: "OPERATOR",
+            value: ">",
+            position: this.position,
+          });
           this.position++;
         }
       } else if (char === "<") {
         if (this.peek() === "=") {
-          this.tokens.push({ type: "OPERATOR", value: "<=", position: this.position });
+          this.tokens.push({
+            type: "OPERATOR",
+            value: "<=",
+            position: this.position,
+          });
           this.position += 2;
         } else {
-          this.tokens.push({ type: "OPERATOR", value: "<", position: this.position });
+          this.tokens.push({
+            type: "OPERATOR",
+            value: "<",
+            position: this.position,
+          });
           this.position++;
         }
       } else if (char === "'" || char === '"') {
@@ -78,7 +121,9 @@ export class Lexer {
       } else if (this.isAlpha(char)) {
         this.tokenizeIdentifierOrKeyword();
       } else {
-        throw new Error(`Unexpected character '${char}' at position ${this.position}`);
+        throw new Error(
+          `Unexpected character '${char}' at position ${this.position}`,
+        );
       }
     }
 
@@ -87,7 +132,10 @@ export class Lexer {
   }
 
   private skipWhitespace(): void {
-    while (this.position < this.input.length && /\s/.test(this.input[this.position])) {
+    while (
+      this.position < this.input.length &&
+      /\s/.test(this.input[this.position])
+    ) {
       this.position++;
     }
   }
@@ -113,7 +161,10 @@ export class Lexer {
     this.position++; // Skip opening quote
     let value = "";
 
-    while (this.position < this.input.length && this.input[this.position] !== quote) {
+    while (
+      this.position < this.input.length &&
+      this.input[this.position] !== quote
+    ) {
       value += this.input[this.position];
       this.position++;
     }
@@ -130,7 +181,10 @@ export class Lexer {
     const start = this.position;
     let value = "";
 
-    while (this.position < this.input.length && this.isDigit(this.input[this.position])) {
+    while (
+      this.position < this.input.length &&
+      this.isDigit(this.input[this.position])
+    ) {
       value += this.input[this.position];
       this.position++;
     }
@@ -138,7 +192,10 @@ export class Lexer {
     if (this.input[this.position] === ".") {
       value += ".";
       this.position++;
-      while (this.position < this.input.length && this.isDigit(this.input[this.position])) {
+      while (
+        this.position < this.input.length &&
+        this.isDigit(this.input[this.position])
+      ) {
         value += this.input[this.position];
         this.position++;
       }
@@ -151,7 +208,10 @@ export class Lexer {
     const start = this.position;
     let value = "";
 
-    while (this.position < this.input.length && this.isAlphaNumeric(this.input[this.position])) {
+    while (
+      this.position < this.input.length &&
+      this.isAlphaNumeric(this.input[this.position])
+    ) {
       value += this.input[this.position];
       this.position++;
     }
@@ -159,6 +219,10 @@ export class Lexer {
     const upperValue = value.toUpperCase();
     const type = KEYWORDS.has(upperValue) ? "KEYWORD" : "IDENTIFIER";
 
-    this.tokens.push({ type, value: type === "KEYWORD" ? upperValue : value, position: start });
+    this.tokens.push({
+      type,
+      value: type === "KEYWORD" ? upperValue : value,
+      position: start,
+    });
   }
 }

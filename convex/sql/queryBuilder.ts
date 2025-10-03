@@ -1,10 +1,197 @@
 import { GenericQueryCtx } from "convex/server";
-import { SelectStatement, WhereClause, JoinClause, ColumnExpression } from "../../lib/sql/types";
+import {
+  SelectStatement,
+  WhereClause,
+  JoinClause,
+  ColumnExpression,
+} from "../../lib/sql/types";
 import { GenericDataModel, TableNamesInDataModel } from "convex/server";
+import schema from "../schema.js";
+
+// Cache for extracted index information
+let indexCache: Record<string, Record<string, string[]>> | null = null;
+
+function getIndexRegistry(): Record<string, Record<string, string[]>> {
+  if (indexCache !== null) {
+    return indexCache;
+  }
+
+  indexCache = {};
+
+  // Extract index information from the schema at runtime
+  if (!schema || !schema.tables) {
+    throw new Error("Schema object not found or does not have tables property");
+  }
+
+  for (const [tableName, tableDefinition] of Object.entries(schema.tables)) {
+    const tableIndexes: Record<string, string[]> = {};
+
+    // Use the experimental indexes() method to get index information
+    if (typeof (tableDefinition as any)[" indexes"] !== "function") {
+      throw new Error(`Table '${tableName}' does not have indexes() method`);
+    }
+
+    const indexes = (tableDefinition as any)[" indexes"]();
+    for (const indexInfo of indexes) {
+      // Skip system indexes (they start with underscore)
+      if (!indexInfo.indexDescriptor.startsWith("_")) {
+        // Remove the tiebreaker field (_creationTime) from the end
+        const fields = indexInfo.fields.slice(0, -1);
+        tableIndexes[indexInfo.indexDescriptor] = fields;
+      }
+    }
+
+    if (Object.keys(tableIndexes).length > 0) {
+      indexCache[tableName] = tableIndexes;
+    }
+  }
+
+  return indexCache;
+}
+
+function applyIndex<DataModel extends GenericDataModel>(
+  ctx: GenericQueryCtx<DataModel>,
+  query: any,
+  tableName: string,
+  indexName: string,
+  whereClause?: WhereClause,
+): any {
+  // Get actual index information from the schema
+  const indexRegistry = getIndexRegistry();
+  const tableIndexes = indexRegistry[tableName];
+
+  if (!tableIndexes) {
+    throw new Error(`Table '${tableName}' not found in schema`);
+  }
+
+  const indexColumns = tableIndexes[indexName];
+  if (!indexColumns) {
+    throw new Error(
+      `Index '${indexName}' not found for table '${tableName}'. ` +
+        `Available indexes: ${Object.keys(tableIndexes).join(", ")}`,
+    );
+  }
+
+  // Build the index filter based on WHERE conditions
+  const indexFilter = buildIndexFilter(whereClause, indexColumns, tableName);
+
+  // Apply the index
+  return query.withIndex(indexName, indexFilter);
+}
+
+function buildIndexFilter(
+  whereClause: WhereClause | undefined,
+  indexColumns: string[],
+  tableName: string,
+): (q: any) => boolean {
+  return (q: any) => {
+    if (!whereClause) {
+      throw new Error(
+        `Index '${indexColumns.join("_and_")}' requires WHERE conditions on columns: ${indexColumns.join(", ")}`,
+      );
+    }
+
+    const conditions = extractComparisonConditions(whereClause, tableName);
+
+    // For multi-column indexes, we need:
+    // - Equality conditions for all columns except possibly the last
+    // - Any condition (including range) for the last column
+    let filterChain = q;
+
+    for (let i = 0; i < indexColumns.length; i++) {
+      const column = indexColumns[i];
+      const isLastColumn = i === indexColumns.length - 1;
+      const condition = conditions.find((c) => c.field === column);
+
+      if (!condition) {
+        if (isLastColumn) {
+          // Last column doesn't require a condition, but we'll skip it
+          continue;
+        } else {
+          throw new Error(
+            `Index '${indexColumns.join("_and_")}' requires WHERE condition on column '${column}' (prefix column)`,
+          );
+        }
+      }
+
+      // Apply the appropriate filter based on the operator
+      switch (condition.operator) {
+        case "=":
+          filterChain = filterChain.eq(column, condition.value);
+          break;
+        case ">":
+          if (!isLastColumn) {
+            throw new Error(
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column '${column}'`,
+            );
+          }
+          filterChain = filterChain.gt(column, condition.value);
+          break;
+        case "<":
+          if (!isLastColumn) {
+            throw new Error(
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column '${column}'`,
+            );
+          }
+          filterChain = filterChain.lt(column, condition.value);
+          break;
+        case ">=":
+          if (!isLastColumn) {
+            throw new Error(
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column '${column}'`,
+            );
+          }
+          filterChain = filterChain.gte(column, condition.value);
+          break;
+        case "<=":
+          if (!isLastColumn) {
+            throw new Error(
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column '${column}'`,
+            );
+          }
+          filterChain = filterChain.lte(column, condition.value);
+          break;
+        default:
+          throw new Error(
+            `Index '${indexColumns.join("_and_")}' does not support operator '${condition.operator}' on column '${column}'`,
+          );
+      }
+    }
+
+    return filterChain;
+  };
+}
+
+function extractComparisonConditions(
+  whereClause: WhereClause,
+  tableName: string,
+): Array<{ field: string; operator: string; value: any }> {
+  const conditions: Array<{ field: string; operator: string; value: any }> = [];
+
+  function traverseWhere(node: WhereClause): void {
+    if (node.type === "COMPARISON") {
+      // Only include conditions for the specified table (or no table specified)
+      if (!node.table || node.table === tableName) {
+        conditions.push({
+          field: node.field!,
+          operator: node.operator!,
+          value: node.value,
+        });
+      }
+    } else if (node.type === "AND") {
+      traverseWhere(node.left!);
+      traverseWhere(node.right!);
+    }
+    // For OR conditions, we don't handle them for indexes (too complex)
+  }
+
+  traverseWhere(whereClause);
+  return conditions;
+}
 
 export async function executeSelect<DataModel extends GenericDataModel>(
   ctx: GenericQueryCtx<DataModel>,
-  statement: SelectStatement
+  statement: SelectStatement,
 ): Promise<any[]> {
   // Handle JOINs if present
   if (statement.joins && statement.joins.length > 0) {
@@ -14,12 +201,25 @@ export async function executeSelect<DataModel extends GenericDataModel>(
   // Simple SELECT without JOIN (original logic)
   const tableName = statement.from as TableNamesInDataModel<DataModel>;
 
-  // Start with a table scan
+  // Start with a table scan or indexed query
   let query = ctx.db.query(tableName);
 
-  // Apply WHERE clause
-  if (statement.where) {
-    query = query.filter((q) => buildFilterExpression(q, statement.where!, statement.from));
+  // Apply index if specified
+  if (statement.fromIndex) {
+    query = applyIndex(
+      ctx,
+      query,
+      statement.from,
+      statement.fromIndex,
+      statement.where,
+    );
+  } else {
+    // Apply WHERE clause as filter
+    if (statement.where) {
+      query = query.filter((q) =>
+        buildFilterExpression(q, statement.where!, statement.from),
+      );
+    }
   }
 
   // Apply ORDER BY and execute query
@@ -47,41 +247,81 @@ export async function executeSelect<DataModel extends GenericDataModel>(
 
 async function executeSelectWithJoin<DataModel extends GenericDataModel>(
   ctx: GenericQueryCtx<DataModel>,
-  statement: SelectStatement
+  statement: SelectStatement,
 ): Promise<any[]> {
   const leftTableName = statement.from as TableNamesInDataModel<DataModel>;
 
   // 1. Query the FROM table (apply WHERE filters that apply to this table)
   let leftQuery = ctx.db.query(leftTableName);
 
-  // Apply WHERE clauses that filter the left table
-  if (statement.where) {
-    leftQuery = leftQuery.filter((q) =>
-      buildFilterExpression(q, statement.where!, statement.from)
+  // Apply index or WHERE clauses that filter the left table
+  if (statement.fromIndex) {
+    leftQuery = applyIndex(
+      ctx,
+      leftQuery,
+      statement.from,
+      statement.fromIndex,
+      statement.where,
     );
+  } else {
+    // Apply WHERE clauses that filter the left table
+    if (statement.where) {
+      leftQuery = leftQuery.filter((q) =>
+        buildFilterExpression(q, statement.where!, statement.from),
+      );
+    }
   }
 
   let leftResults = await leftQuery.collect();
 
   // 2. For each JOIN, fetch and merge data
   for (const join of statement.joins!) {
-    leftResults = await performJoin(ctx, leftResults, join, statement.from);
+    leftResults = await performJoin(
+      ctx,
+      leftResults,
+      join,
+      statement.from,
+      statement.where,
+    );
   }
 
   // 3. Apply column projection
-  return projectColumns(leftResults, statement.columns, statement.from, statement.joins);
+  return projectColumns(
+    leftResults,
+    statement.columns,
+    statement.from,
+    statement.joins,
+  );
 }
 
 async function performJoin<DataModel extends GenericDataModel>(
   ctx: GenericQueryCtx<DataModel>,
   leftResults: any[],
   join: JoinClause,
-  fromTable: string
+  fromTable: string,
+  globalWhereClause?: WhereClause,
 ): Promise<any[]> {
   const rightTableName = join.table as TableNamesInDataModel<DataModel>;
 
-  // Fetch all from right table
-  const rightResults = await ctx.db.query(rightTableName).collect();
+  // Fetch from right table, potentially using an index
+  let rightQuery = ctx.db.query(rightTableName);
+
+  // Note: Currently not using indexes on joined tables since JOIN implementation
+  // does full table scans. Indexes are only effective on the main FROM table.
+  // We allow the syntax for future optimization but don't use the index yet.
+  if (join.index) {
+    // TODO: Implement index optimization for JOINs
+    // For now, we ignore the index but allow the syntax
+  }
+
+  // Apply any WHERE conditions that apply to this joined table
+  if (globalWhereClause) {
+    rightQuery = rightQuery.filter((q) =>
+      buildFilterExpression(q, globalWhereClause, join.table),
+    );
+  }
+
+  const rightResults = await rightQuery.collect();
 
   // Create index map for right table for efficient lookup
   const rightMap = new Map<any, any[]>();
@@ -127,7 +367,7 @@ function projectColumns(
   results: any[],
   columns: ColumnExpression[],
   fromTable: string,
-  joins?: JoinClause[]
+  joins?: JoinClause[],
 ): any[] {
   // Handle SELECT *
   if (columns.length === 1 && columns[0].type === "STAR") {
@@ -181,7 +421,11 @@ function projectColumns(
   });
 }
 
-function buildFilterExpression(q: any, where: WhereClause, currentTable: string): boolean {
+function buildFilterExpression(
+  q: any,
+  where: WhereClause,
+  currentTable: string,
+): boolean {
   if (where.type === "COMPARISON") {
     // Only apply filter if it's for the current table (or no table specified)
     if (where.table && where.table !== currentTable) {
@@ -211,12 +455,12 @@ function buildFilterExpression(q: any, where: WhereClause, currentTable: string)
   } else if (where.type === "AND") {
     return q.and(
       buildFilterExpression(q, where.left!, currentTable),
-      buildFilterExpression(q, where.right!, currentTable)
+      buildFilterExpression(q, where.right!, currentTable),
     );
   } else if (where.type === "OR") {
     return q.or(
       buildFilterExpression(q, where.left!, currentTable),
-      buildFilterExpression(q, where.right!, currentTable)
+      buildFilterExpression(q, where.right!, currentTable),
     );
   }
 

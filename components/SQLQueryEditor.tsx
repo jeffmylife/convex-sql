@@ -35,9 +35,18 @@ const EXAMPLE_QUERIES = [
 
   "SELECT name, email\nFROM users\nWHERE age > 18",
 
+  "SELECT * FROM users@by_status WHERE status = 'active'",
+
+  "SELECT * FROM users@by_status_and_age WHERE status = 'active' AND age > 20",
+
   `SELECT users.name, posts.title
 FROM users
 INNER JOIN posts ON users._id = posts.authorId`,
+
+  `SELECT users.name, posts.title
+FROM users@by_status
+INNER JOIN posts@by_author ON users._id = posts.authorId
+WHERE users.status = 'active'`,
 
   `SELECT users.name, posts.title
 FROM users

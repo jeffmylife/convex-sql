@@ -1,4 +1,11 @@
-import { Token, SelectStatement, ColumnExpression, WhereClause, OrderByClause, JoinClause } from "./types";
+import {
+  Token,
+  SelectStatement,
+  ColumnExpression,
+  WhereClause,
+  OrderByClause,
+  JoinClause,
+} from "./types";
 
 export class Parser {
   private tokens: Token[];
@@ -18,7 +25,7 @@ export class Parser {
     const columns = this.parseColumns();
 
     this.consume("KEYWORD", "FROM");
-    const from = this.consume("IDENTIFIER").value;
+    const { table: from, index: fromIndex } = this.parseTableWithIndex();
 
     // Parse JOINs
     const joins: JoinClause[] = [];
@@ -52,11 +59,24 @@ export class Parser {
       type: "SELECT",
       columns,
       from,
+      fromIndex,
       joins: joins.length > 0 ? joins : undefined,
       where,
       orderBy,
       limit,
     };
+  }
+
+  private parseTableWithIndex(): { table: string; index?: string } {
+    const table = this.consume("IDENTIFIER").value;
+    let index: string | undefined;
+
+    if (this.check("AT")) {
+      this.advance(); // consume @
+      index = this.consume("IDENTIFIER").value;
+    }
+
+    return { table, index };
   }
 
   private parseColumns(): ColumnExpression[] {
@@ -109,7 +129,7 @@ export class Parser {
     this.consume("KEYWORD", "INNER");
     this.consume("KEYWORD", "JOIN");
 
-    const table = this.consume("IDENTIFIER").value;
+    const { table, index } = this.parseTableWithIndex();
 
     this.consume("KEYWORD", "ON");
 
@@ -130,6 +150,7 @@ export class Parser {
     return {
       type: "INNER",
       table,
+      index,
       on: {
         leftTable,
         leftField,
@@ -183,7 +204,13 @@ export class Parser {
       field = first;
     }
 
-    const operator = this.consume("OPERATOR").value as "=" | "!=" | ">" | "<" | ">=" | "<=";
+    const operator = this.consume("OPERATOR").value as
+      | "="
+      | "!="
+      | ">"
+      | "<"
+      | ">="
+      | "<=";
 
     let value: string | number | boolean | null;
 
@@ -198,7 +225,9 @@ export class Parser {
       else if (id.toLowerCase() === "null") value = null;
       else throw new Error(`Unexpected identifier in comparison: ${id}`);
     } else {
-      throw new Error(`Expected value in comparison at position ${this.peek().position}`);
+      throw new Error(
+        `Expected value in comparison at position ${this.peek().position}`,
+      );
     }
 
     return {
@@ -260,7 +289,7 @@ export class Parser {
 
     const token = this.peek();
     throw new Error(
-      `Expected ${type}${value ? ` '${value}'` : ""} but got ${token.type} '${token.value}' at position ${token.position}`
+      `Expected ${type}${value ? ` '${value}'` : ""} but got ${token.type} '${token.value}' at position ${token.position}`,
     );
   }
 
