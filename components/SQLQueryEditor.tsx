@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -23,6 +22,10 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Play, Database, Trash2, AlertCircle, Loader2, Radio } from "lucide-react";
+import Editor from "react-simple-code-editor";
+import Prism from "prismjs";
+import "prismjs/components/prism-sql";
+import "prismjs/themes/prism-tomorrow.css";
 
 const EXAMPLE_QUERIES = [
   "SELECT * FROM users",
@@ -120,13 +123,25 @@ export function SQLQueryEditor() {
             READ-ONLY
           </Badge>
         </div>
-        <Textarea
-          value={sql}
-          onChange={(e) => setSql(e.target.value)}
+        <div
+          className="border rounded-md bg-[var(--color-muted)]/30 border-[var(--color-muted-foreground)]/20 overflow-hidden"
           onKeyDown={handleKeyDown}
-          className="font-mono min-h-[140px] resize-none bg-[var(--color-muted)]/30 border-[var(--color-muted-foreground)]/20"
-          placeholder="SELECT * FROM users WHERE age > 18"
-        />
+        >
+          <Editor
+            value={sql}
+            onValueChange={setSql}
+            highlight={(code) => Prism.highlight(code, Prism.languages.sql, "sql")}
+            padding={12}
+            style={{
+              fontFamily: "var(--font-geist-mono), monospace",
+              fontSize: 14,
+              minHeight: "140px",
+              backgroundColor: "transparent",
+            }}
+            textareaClassName="focus:outline-none"
+            placeholder="SELECT * FROM users WHERE age > 18"
+          />
+        </div>
         <div className="flex gap-2 items-center">
           <Button onClick={handleExecute} size="default">
             <Play className="mr-2 h-4 w-4" />
@@ -202,16 +217,8 @@ export function SQLQueryEditor() {
             </p>
           </div>
         ) : results && results.length > 0 ? (
-          <div className="space-y-3">
-            <Alert className="bg-[var(--color-accent)]/20 border-[var(--color-accent)]/40">
-              <Radio className="h-4 w-4" />
-              <AlertTitle>Real-time Results</AlertTitle>
-              <AlertDescription className="text-xs">
-                These results update automatically as your database changes. Changed rows will flash briefly.
-              </AlertDescription>
-            </Alert>
-            <div className="rounded-lg border bg-[var(--color-card)] shadow-sm overflow-hidden">
-              <div className="max-h-[500px] overflow-auto">
+          <div className="rounded-lg border bg-[var(--color-card)] shadow-sm overflow-hidden">
+            <div className="max-h-[500px] overflow-auto">
               <Table>
                 <TableHeader className="sticky top-0 bg-[var(--color-muted)] backdrop-blur-sm border-b">
                   <TableRow className="hover:bg-[var(--color-muted)]">
@@ -246,7 +253,6 @@ export function SQLQueryEditor() {
                 </TableBody>
               </Table>
             </div>
-          </div>
           </div>
         ) : null}
       </div>

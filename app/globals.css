@@ -106,4 +106,128 @@
   .animate-highlight {
     animation: highlight 2s ease-out;
   }
+
+  /* Custom Prism syntax highlighting - High contrast color scheme */
+  .token.comment,
+  .token.prolog,
+  .token.doctype,
+  .token.cdata {
+    color: hsl(var(--muted-foreground));
+    font-style: italic;
+  }
+
+  /* SQL Keywords - Bold vibrant blue */
+  .token.keyword {
+    color: #2563eb;
+    font-weight: 700;
+  }
+
+  /* Strings - Vibrant orange for high contrast */
+  .token.string,
+  .token.char,
+  .token.attr-value {
+    color: #ea580c;
+    font-weight: 500;
+  }
+
+  /* Numbers and booleans - Deep green */
+  .token.number,
+  .token.boolean,
+  .token.constant {
+    color: #16a34a;
+    font-weight: 600;
+  }
+
+  /* Operators - Purple for distinction */
+  .token.operator {
+    color: #9333ea;
+    font-weight: 600;
+  }
+
+  /* Functions and identifiers */
+  .token.function,
+  .token.class-name {
+    color: #0891b2;
+    font-weight: 500;
+  }
+
+  /* Punctuation - More visible */
+  .token.punctuation {
+    color: hsl(var(--foreground));
+    opacity: 0.8;
+  }
+
+  .token.selector,
+  .token.important,
+  .token.atrule,
+  .token.builtin {
+    color: #2563eb;
+    font-weight: 600;
+  }
+
+  /* Dark mode adjustments */
+  .dark .token.keyword {
+    color: #60a5fa;
+    font-weight: 700;
+  }
+
+  .dark .token.string,
+  .dark .token.char,
+  .dark .token.attr-value {
+    color: #fb923c;
+    font-weight: 500;
+  }
+
+  .dark .token.number,
+  .dark .token.boolean,
+  .dark .token.constant {
+    color: #4ade80;
+    font-weight: 600;
+  }
+
+  .dark .token.operator {
+    color: #c084fc;
+    font-weight: 600;
+  }
+
+  .dark .token.function,
+  .dark .token.class-name {
+    color: #22d3ee;
+    font-weight: 500;
+  }
+
+  /* Code editor placeholder styling */
+  .npm__react-simple-code-editor__textarea::placeholder {
+    color: hsl(var(--muted-foreground)) !important;
+    opacity: 0.5;
+  }
+
+  /* Code editor scrollbar styling */
+  .npm__react-simple-code-editor__textarea,
+  pre[class*="language-"] {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground)) transparent;
+  }
+
+  .npm__react-simple-code-editor__textarea::-webkit-scrollbar,
+  pre[class*="language-"]::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .npm__react-simple-code-editor__textarea::-webkit-scrollbar-track,
+  pre[class*="language-"]::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .npm__react-simple-code-editor__textarea::-webkit-scrollbar-thumb,
+  pre[class*="language-"]::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground));
+    border-radius: 4px;
+  }
+
+  .npm__react-simple-code-editor__textarea::-webkit-scrollbar-thumb:hover,
+  pre[class*="language-"]::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--foreground));
+  }
 }
