@@ -2,7 +2,27 @@
 
 import { useState } from "react";
 import { useQuery, useMutation } from "convex/react";
-import { api } from "../convex/_generated/api";
+import { api } from "@/convex/_generated/api";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Play, Database, Trash2, AlertCircle, Loader2 } from "lucide-react";
 
 const EXAMPLE_QUERIES = [
   "SELECT * FROM users",
@@ -35,117 +55,137 @@ export function SQLQueryEditor() {
   const error = response?.success === false ? response.error : null;
 
   return (
-    <div className="flex flex-col gap-4 w-full max-w-4xl mx-auto">
-      <div className="flex gap-2">
-        <button
-          onClick={() => void seedDatabase()}
-          className="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded-md transition-colors"
-        >
-          Seed Sample Data
-        </button>
-        <button
-          onClick={() => void clearDatabase()}
-          className="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1 rounded-md transition-colors"
-        >
-          Clear Data
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <label className="text-sm font-semibold">SQL Query</label>
-        <textarea
-          value={sql}
-          onChange={(e) => setSql(e.target.value)}
-          onKeyDown={handleKeyDown}
-          className="font-mono text-sm p-3 border-2 border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-900 min-h-[100px] focus:outline-none focus:border-blue-500"
-          placeholder="SELECT * FROM users WHERE age > 18"
-        />
-        <div className="flex gap-2 items-center">
-          <button
-            onClick={handleExecute}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-md transition-colors"
+    <div className="flex flex-col gap-6 w-full max-w-6xl mx-auto">
+      <div className="flex gap-2 items-center justify-between">
+        <div className="flex gap-2">
+          <Button
+            onClick={() => void seedDatabase()}
+            variant="outline"
+            size="sm"
           >
-            Execute (⌘/Ctrl + Enter)
-          </button>
-          <select
-            className="text-sm px-3 py-2 border-2 border-slate-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-900"
-            onChange={(e) => setSql(e.target.value)}
-            value=""
+            <Database className="mr-2 h-4 w-4" />
+            Seed Sample Data
+          </Button>
+          <Button
+            onClick={() => void clearDatabase()}
+            variant="outline"
+            size="sm"
           >
-            <option value="">Load example...</option>
-            {EXAMPLE_QUERIES.map((query, i) => (
-              <option key={i} value={query}>
-                {query}
-              </option>
-            ))}
-          </select>
+            <Trash2 className="mr-2 h-4 w-4" />
+            Clear Data
+          </Button>
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <label className="text-sm font-semibold">Results</label>
+      <div className="flex flex-col gap-4 border rounded-lg p-6 bg-[var(--color-card)] shadow-sm">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-semibold">SQL Query</label>
+          <Badge variant="outline" className="font-mono text-[10px]">
+            READ-ONLY
+          </Badge>
+        </div>
+        <Textarea
+          value={sql}
+          onChange={(e) => setSql(e.target.value)}
+          onKeyDown={handleKeyDown}
+          className="font-mono min-h-[140px] resize-none bg-[var(--color-muted)]/30 border-[var(--color-muted-foreground)]/20"
+          placeholder="SELECT * FROM users WHERE age > 18"
+        />
+        <div className="flex gap-2 items-center">
+          <Button onClick={handleExecute} size="default">
+            <Play className="mr-2 h-4 w-4" />
+            Execute Query
+          </Button>
+          <Select onValueChange={setSql}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Load example..." />
+            </SelectTrigger>
+            <SelectContent>
+              {EXAMPLE_QUERIES.map((query, i) => (
+                <SelectItem key={i} value={query}>
+                  Example {i + 1}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="ml-auto">
+            <Badge variant="secondary" className="font-mono text-[10px]">
+              <span className="text-xs mr-1">⌘</span>+ Enter
+            </Badge>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-semibold">Results</label>
+          {results && (
+            <Badge variant="outline">
+              {results.length} row{results.length !== 1 ? "s" : ""}
+            </Badge>
+          )}
+        </div>
         {response === undefined ? (
-          <div className="p-4 border-2 border-slate-300 dark:border-slate-700 rounded-md bg-slate-100 dark:bg-slate-900">
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              Loading...
-            </p>
+          <div className="flex items-center justify-center p-16 border rounded-lg bg-[var(--color-card)] shadow-sm">
+            <Loader2 className="h-6 w-6 animate-spin text-[var(--color-primary)]" />
+            <span className="ml-3 text-sm text-[var(--color-muted-foreground)]">
+              Executing query...
+            </span>
           </div>
         ) : error ? (
-          <div className="p-4 border-2 border-red-300 dark:border-red-700 rounded-md bg-red-50 dark:bg-red-950">
-            <p className="text-sm text-red-700 dark:text-red-300 font-semibold">
-              Error:
-            </p>
-            <p className="text-sm text-red-600 dark:text-red-400 font-mono mt-1">
+          <Alert variant="destructive" className="shadow-sm">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Query Error</AlertTitle>
+            <AlertDescription className="font-mono text-xs mt-2">
               {error}
-            </p>
-          </div>
+            </AlertDescription>
+          </Alert>
         ) : results && results.length === 0 ? (
-          <div className="p-4 border-2 border-slate-300 dark:border-slate-700 rounded-md bg-slate-100 dark:bg-slate-900">
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              No results
+          <div className="flex flex-col items-center justify-center p-16 border rounded-lg bg-[var(--color-card)] shadow-sm">
+            <Database className="h-12 w-12 text-[var(--color-muted-foreground)]/40 mb-3" />
+            <p className="text-sm font-medium text-[var(--color-muted-foreground)]">
+              No results found
+            </p>
+            <p className="text-xs text-[var(--color-muted-foreground)] mt-1">
+              Try seeding sample data or adjusting your query
             </p>
           </div>
         ) : results && results.length > 0 ? (
-          <div className="border-2 border-slate-300 dark:border-slate-700 rounded-md overflow-auto max-h-[400px]">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-200 dark:bg-slate-800 sticky top-0">
-                <tr>
-                  {Object.keys(results[0]).map((key) => (
-                    <th
-                      key={key}
-                      className="text-left px-4 py-2 font-semibold border-b-2 border-slate-300 dark:border-slate-700"
-                    >
-                      {key}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((row, i) => (
-                  <tr
-                    key={i}
-                    className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-900"
-                  >
-                    {Object.values(row).map((value, j) => (
-                      <td key={j} className="px-4 py-2">
-                        {typeof value === "boolean"
-                          ? value.toString()
-                          : value === null
-                            ? "null"
-                            : String(value)}
-                      </td>
+          <div className="rounded-lg border bg-[var(--color-card)] shadow-sm overflow-hidden">
+            <div className="max-h-[500px] overflow-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-[var(--color-muted)] backdrop-blur-sm border-b">
+                  <TableRow className="hover:bg-[var(--color-muted)]">
+                    {Object.keys(results[0]).map((key) => (
+                      <TableHead key={key} className="font-semibold text-[var(--color-foreground)]">
+                        {key}
+                      </TableHead>
                     ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {results.map((row, i) => (
+                    <TableRow key={i}>
+                      {Object.values(row).map((value, j) => (
+                        <TableCell key={j} className="font-mono text-xs">
+                          {typeof value === "boolean" ? (
+                            <Badge variant={value ? "default" : "secondary"} className="text-[10px]">
+                              {value.toString()}
+                            </Badge>
+                          ) : value === null ? (
+                            <span className="text-[var(--color-muted-foreground)] italic">null</span>
+                          ) : (
+                            String(value)
+                          )}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         ) : null}
-        {results && (
-          <p className="text-xs text-slate-600 dark:text-slate-400">
-            {results.length} row(s) returned
-          </p>
-        )}
       </div>
     </div>
   );
