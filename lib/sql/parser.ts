@@ -1,4 +1,4 @@
-import { Token, SelectStatement, ColumnExpression, WhereClause, OrderByClause } from "./types";
+import { Token, SelectStatement, ColumnExpression, WhereClause, OrderByClause, JoinClause } from "./types";
 
 export class Parser {
   private tokens: Token[];
@@ -19,6 +19,12 @@ export class Parser {
 
     this.consume("KEYWORD", "FROM");
     const from = this.consume("IDENTIFIER").value;
+
+    // Parse JOINs
+    const joins: JoinClause[] = [];
+    while (this.check("KEYWORD", "INNER")) {
+      joins.push(this.parseJoin());
+    }
 
     let where: WhereClause | undefined;
     if (this.check("KEYWORD", "WHERE")) {
@@ -46,6 +52,7 @@ export class Parser {
       type: "SELECT",
       columns,
       from,
+      joins: joins.length > 0 ? joins : undefined,
       where,
       orderBy,
       limit,
@@ -62,18 +69,75 @@ export class Parser {
     }
 
     do {
-      const column = this.consume("IDENTIFIER").value;
-      let alias: string | undefined;
+      const first = this.consume("IDENTIFIER").value;
 
-      if (this.check("KEYWORD", "AS")) {
+      // Check for table.column or table.*
+      if (this.check("DOT")) {
         this.advance();
-        alias = this.consume("IDENTIFIER").value;
-      }
 
-      columns.push({ type: "COLUMN", name: column, alias });
+        if (this.check("STAR")) {
+          this.advance();
+          columns.push({ type: "TABLE_STAR", table: first });
+        } else {
+          const column = this.consume("IDENTIFIER").value;
+          let alias: string | undefined;
+
+          if (this.check("KEYWORD", "AS")) {
+            this.advance();
+            alias = this.consume("IDENTIFIER").value;
+          }
+
+          columns.push({ type: "COLUMN", table: first, name: column, alias });
+        }
+      } else {
+        // Just a column name
+        let alias: string | undefined;
+
+        if (this.check("KEYWORD", "AS")) {
+          this.advance();
+          alias = this.consume("IDENTIFIER").value;
+        }
+
+        columns.push({ type: "COLUMN", name: first, alias });
+      }
     } while (this.match("COMMA"));
 
     return columns;
+  }
+
+  private parseJoin(): JoinClause {
+    this.consume("KEYWORD", "INNER");
+    this.consume("KEYWORD", "JOIN");
+
+    const table = this.consume("IDENTIFIER").value;
+
+    this.consume("KEYWORD", "ON");
+
+    // Parse: leftTable.leftField = rightTable.rightField
+    const leftTable = this.consume("IDENTIFIER").value;
+    this.consume("DOT");
+    const leftField = this.consume("IDENTIFIER").value;
+
+    const operator = this.consume("OPERATOR").value;
+    if (operator !== "=") {
+      throw new Error(`JOIN only supports '=' operator, got '${operator}'`);
+    }
+
+    const rightTable = this.consume("IDENTIFIER").value;
+    this.consume("DOT");
+    const rightField = this.consume("IDENTIFIER").value;
+
+    return {
+      type: "INNER",
+      table,
+      on: {
+        leftTable,
+        leftField,
+        operator: "=",
+        rightTable,
+        rightField,
+      },
+    };
   }
 
   private parseWhere(): WhereClause {
@@ -105,7 +169,20 @@ export class Parser {
   }
 
   private parseComparison(): WhereClause {
-    const field = this.consume("IDENTIFIER").value;
+    const first = this.consume("IDENTIFIER").value;
+
+    let table: string | undefined;
+    let field: string;
+
+    // Check for table.field syntax
+    if (this.check("DOT")) {
+      this.advance();
+      table = first;
+      field = this.consume("IDENTIFIER").value;
+    } else {
+      field = first;
+    }
+
     const operator = this.consume("OPERATOR").value as "=" | "!=" | ">" | "<" | ">=" | "<=";
 
     let value: string | number | boolean | null;
@@ -126,6 +203,7 @@ export class Parser {
 
     return {
       type: "COMPARISON",
+      table,
       field,
       operator,
       value,
@@ -136,14 +214,27 @@ export class Parser {
     const orderBy: OrderByClause[] = [];
 
     do {
-      const field = this.consume("IDENTIFIER").value;
+      const first = this.consume("IDENTIFIER").value;
+
+      let table: string | undefined;
+      let field: string;
+
+      // Check for table.field syntax
+      if (this.check("DOT")) {
+        this.advance();
+        table = first;
+        field = this.consume("IDENTIFIER").value;
+      } else {
+        field = first;
+      }
+
       let direction: "asc" | "desc" = "asc";
 
       if (this.check("KEYWORD", "ASC") || this.check("KEYWORD", "DESC")) {
         direction = this.advance().value.toLowerCase() as "asc" | "desc";
       }
 
-      orderBy.push({ field, direction });
+      orderBy.push({ table, field, direction });
     } while (this.match("COMMA"));
 
     return orderBy;

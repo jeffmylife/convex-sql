@@ -33,9 +33,10 @@ import { Parser } from "@/lib/sql/parser";
 const EXAMPLE_QUERIES = [
   "SELECT * FROM users",
   "SELECT name, email FROM users WHERE age > 18",
-  "SELECT * FROM users WHERE status = 'active' ORDER BY age DESC LIMIT 10",
+  "SELECT users.name, posts.title FROM users INNER JOIN posts ON users._id = posts.authorId",
+  "SELECT users.name, posts.title FROM users INNER JOIN posts ON users._id = posts.authorId WHERE users.age > 25",
+  "SELECT users.name, posts.title FROM users INNER JOIN posts ON users._id = posts.authorId WHERE posts.published = true",
   "SELECT * FROM posts WHERE published = true",
-  "SELECT name, email FROM users WHERE status = 'active' AND age >= 21",
 ];
 
 export function SQLQueryEditor() {

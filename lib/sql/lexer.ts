@@ -12,6 +12,9 @@ const KEYWORDS = new Set([
   "ASC",
   "DESC",
   "AS",
+  "INNER",
+  "JOIN",
+  "ON",
 ]);
 
 export class Lexer {
@@ -36,6 +39,15 @@ export class Lexer {
         this.position++;
       } else if (char === ",") {
         this.tokens.push({ type: "COMMA", value: ",", position: this.position });
+        this.position++;
+      } else if (char === ".") {
+        this.tokens.push({ type: "DOT", value: ".", position: this.position });
+        this.position++;
+      } else if (char === "(") {
+        this.tokens.push({ type: "LPAREN", value: "(", position: this.position });
+        this.position++;
+      } else if (char === ")") {
+        this.tokens.push({ type: "RPAREN", value: ")", position: this.position });
         this.position++;
       } else if (char === "=") {
         this.tokens.push({ type: "OPERATOR", value: "=", position: this.position });
