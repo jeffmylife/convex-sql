@@ -1,8 +1,11 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { faker } from "@faker-js/faker";
+
+const STATUSES = ["active", "inactive", "pending"];
 
 /**
- * Seed the database with sample users and posts
+ * Seed the database with sample users and posts using Faker
  */
 export const seedDatabase = mutation({
   args: {},
@@ -15,70 +18,40 @@ export const seedDatabase = mutation({
       return null;
     }
 
-    // Create users
-    const user1 = await ctx.db.insert("users", {
-      name: "Alice Johnson",
-      email: "alice@example.com",
-      age: 28,
-      status: "active",
-    });
+    const NUM_USERS = 300;
+    const NUM_POSTS = 800;
 
-    const user2 = await ctx.db.insert("users", {
-      name: "Bob Smith",
-      email: "bob@example.com",
-      age: 35,
-      status: "active",
-    });
+    // Use seed for deterministic results
+    faker.seed(12345);
 
-    const user3 = await ctx.db.insert("users", {
-      name: "Charlie Brown",
-      email: "charlie@example.com",
-      age: 17,
-      status: "pending",
-    });
+    console.log(`Seeding ${NUM_USERS} users...`);
 
-    const user4 = await ctx.db.insert("users", {
-      name: "Diana Prince",
-      email: "diana@example.com",
-      age: 42,
-      status: "active",
-    });
+    // Create users with realistic fake data
+    const userIds: Array<any> = [];
+    for (let i = 0; i < NUM_USERS; i++) {
+      const userId = await ctx.db.insert("users", {
+        name: faker.person.fullName(),
+        email: faker.internet.email().toLowerCase(),
+        age: faker.number.int({ min: 18, max: 67 }),
+        status: faker.helpers.arrayElement(STATUSES),
+      });
 
-    const user5 = await ctx.db.insert("users", {
-      name: "Eve Davis",
-      email: "eve@example.com",
-      age: 23,
-      status: "inactive",
-    });
+      userIds.push(userId);
+    }
 
-    // Create posts
-    await ctx.db.insert("posts", {
-      title: "Getting Started with Convex",
-      content: "Convex is a great backend platform...",
-      authorId: user1,
-      published: true,
-    });
+    console.log(`Seeding ${NUM_POSTS} posts...`);
 
-    await ctx.db.insert("posts", {
-      title: "SQL Queries in Convex",
-      content: "You can now write SQL-like queries...",
-      authorId: user1,
-      published: true,
-    });
+    // Create posts with variety
+    for (let i = 0; i < NUM_POSTS; i++) {
+      const authorId = faker.helpers.arrayElement(userIds);
 
-    await ctx.db.insert("posts", {
-      title: "Draft Post",
-      content: "This is a draft post...",
-      authorId: user2,
-      published: false,
-    });
-
-    await ctx.db.insert("posts", {
-      title: "Advanced Convex Patterns",
-      content: "Learn about advanced patterns...",
-      authorId: user4,
-      published: true,
-    });
+      await ctx.db.insert("posts", {
+        title: faker.lorem.sentence({ min: 3, max: 8 }),
+        content: faker.lorem.paragraphs({ min: 1, max: 3 }),
+        authorId,
+        published: faker.datatype.boolean({ probability: 0.7 }), // 70% published
+      });
+    }
 
     console.log("Database seeded successfully!");
     return null;
