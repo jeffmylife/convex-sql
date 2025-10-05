@@ -31,65 +31,59 @@ import { Lexer } from "@/lib/sql/lexer";
 import { Parser } from "@/lib/sql/parser";
 
 const EXAMPLE_QUERIES = [
-  "SELECT * FROM users",
-
-  "SELECT name, email\nFROM users\nWHERE age > 18",
-
-  "SELECT * FROM users@by_status WHERE status = 'active'",
-
-  "SELECT * FROM users@by_status_and_age WHERE status = 'active' AND age > 20",
-
-  `SELECT users.name, posts.title
+  {
+    label: "Basic: Select all users",
+    query: "SELECT * FROM users",
+  },
+  {
+    label: "WHERE: Filter by age",
+    query: "SELECT name, email\nFROM users\nWHERE age > 18",
+  },
+  {
+    label: "Index: Query with index",
+    query: "SELECT * FROM users@by_status WHERE status = 'active'",
+  },
+  {
+    label: "JOIN: Users & posts",
+    query: `SELECT users.name, posts.title
 FROM users
 INNER JOIN posts ON users._id = posts.authorId`,
-
-  `SELECT users.name, posts.title
+  },
+  {
+    label: "JOIN: With index optimization",
+    query: `SELECT users.name, posts.title
 FROM users@by_status
 INNER JOIN posts@by_author ON users._id = posts.authorId
 WHERE users.status = 'active'`,
-
-  "SELECT COUNT(*) FROM users",
-
-  "SELECT COUNT(*), ABS(age) FROM users WHERE age < 0",
-
-  `SELECT users.name, posts.title
-FROM users
-INNER JOIN posts ON users._id = posts.authorId
-WHERE users.age > 25`,
-
-  `SELECT users.name, posts.title
-FROM users
-INNER JOIN posts ON users._id = posts.authorId
-WHERE posts.published = true`,
-
-  "SELECT * FROM posts\nWHERE published = true",
-
-  `SELECT status, COUNT(*) AS user_count
+  },
+  {
+    label: "Aggregate: COUNT",
+    query: "SELECT COUNT(*) FROM users",
+  },
+  {
+    label: "GROUP BY: Count by status",
+    query: `SELECT status, COUNT(*) AS user_count
 FROM users
 GROUP BY status`,
-
-  `SELECT status, AVG(age) AS avg_age
+  },
+  {
+    label: "GROUP BY: AVG, MIN, MAX",
+    query: `SELECT status, AVG(age) AS avg_age, MIN(age) AS min_age, MAX(age) AS max_age
 FROM users
 GROUP BY status`,
-
-  `SELECT status, MIN(age) AS min_age, MAX(age) AS max_age
-FROM users
-GROUP BY status`,
-
-  `SELECT status, COUNT(*) AS count
+  },
+  {
+    label: "HAVING: Filter groups",
+    query: `SELECT status, COUNT(*) AS count
 FROM users
 GROUP BY status
 HAVING COUNT(*) > 1`,
-
-  `SELECT status, SUM(age) AS total_age
-FROM users
-GROUP BY status
-HAVING SUM(age) > 50`,
+  },
 ];
 
 export function SQLQueryEditor() {
-  const [sql, setSql] = useState(EXAMPLE_QUERIES[0]);
-  const [executedQuery, setExecutedQuery] = useState(EXAMPLE_QUERIES[0]);
+  const [sql, setSql] = useState(EXAMPLE_QUERIES[0].query);
+  const [executedQuery, setExecutedQuery] = useState(EXAMPLE_QUERIES[0].query);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [changedRows, setChangedRows] = useState<Set<number>>(new Set());
   const [autoExecute, setAutoExecute] = useState(false);
@@ -285,13 +279,13 @@ export function SQLQueryEditor() {
             Execute Query
           </Button>
           <Select onValueChange={setSql}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[240px]">
               <SelectValue placeholder="Load example..." />
             </SelectTrigger>
             <SelectContent>
-              {EXAMPLE_QUERIES.map((query, i) => (
-                <SelectItem key={i} value={query}>
-                  Example {i + 1}
+              {EXAMPLE_QUERIES.map((example, i) => (
+                <SelectItem key={i} value={example.query}>
+                  {example.label}
                 </SelectItem>
               ))}
             </SelectContent>
