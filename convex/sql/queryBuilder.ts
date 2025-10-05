@@ -381,6 +381,29 @@ function projectColumns(
   fromTable: string,
   joins?: JoinClause[],
 ): any[] {
+  // If the selection is only aggregates (FUNCTION columns) with no plain columns,
+  // compute once and return a single-row result.
+  const hasOnlyFunctions =
+    columns.length > 0 && columns.every((c) => c.type === "FUNCTION");
+  const hasAnyFunctions = columns.some((c) => c.type === "FUNCTION");
+  const hasAnyPlainColumns = columns.some((c) => c.type === "COLUMN");
+
+  if (hasAnyFunctions && hasAnyPlainColumns) {
+    // Real SQL would require GROUP BY for mixing aggregates and non-aggregates.
+    // Keep it simple and error clearly for now.
+    throw new Error(
+      "Mixing aggregates with columns requires GROUP BY (not implemented)",
+    );
+  }
+
+  if (hasOnlyFunctions) {
+    const row: any = {};
+    for (const col of columns) {
+      const key = col.alias || `${col.name}(${formatFunctionArgs(col.args)})`;
+      row[key] = executeFunction(col.name, col.args, null, results);
+    }
+    return [row];
+  }
   // Handle SELECT *
   if (columns.length === 1 && columns[0].type === "STAR") {
     // If no joins, return as-is
@@ -410,6 +433,10 @@ function projectColumns(
           const key = col.alias || col.name;
           const sourceKey = col.table ? `${col.table}.${col.name}` : col.name;
           projected[key] = row[sourceKey] ?? row[col.name];
+        } else if (col.type === "FUNCTION") {
+          const key =
+            col.alias || `${col.name}(${formatFunctionArgs(col.args)})`;
+          projected[key] = executeFunction(col.name, col.args, row, results);
         }
       }
 
@@ -426,6 +453,9 @@ function projectColumns(
         const key = col.alias || col.name;
         const sourceKey = col.table ? `${col.table}.${col.name}` : col.name;
         projected[key] = row[sourceKey] ?? row[col.name];
+      } else if (col.type === "FUNCTION") {
+        const key = col.alias || `${col.name}(${formatFunctionArgs(col.args)})`;
+        projected[key] = executeFunction(col.name, col.args, row, results);
       }
     }
 
@@ -561,6 +591,60 @@ async function performOptimizedJoin<DataModel extends GenericDataModel>(
   }
 
   return joined;
+}
+
+function formatFunctionArgs(args: ColumnExpression[]): string {
+  return args
+    .map((arg) => {
+      switch (arg.type) {
+        case "STAR":
+          return "*";
+        case "TABLE_STAR":
+          return `${arg.table}.*`;
+        case "COLUMN":
+          return arg.table ? `${arg.table}.${arg.name}` : arg.name;
+        case "FUNCTION":
+          return `${arg.name}(${formatFunctionArgs(arg.args)})`;
+        default:
+          return "?";
+      }
+    })
+    .join(", ");
+}
+
+function executeFunction(
+  name: string,
+  args: ColumnExpression[],
+  row: any,
+  allResults: any[],
+): any {
+  switch (name) {
+    case "COUNT":
+      // COUNT(*) returns the total number of rows
+      if (args.length === 1 && args[0].type === "STAR") {
+        return allResults.length;
+      }
+      // For now, just return the count of non-null values
+      const arg = args[0];
+      if (arg && arg.type === "COLUMN") {
+        const key = arg.table ? `${arg.table}.${arg.name}` : arg.name;
+        return allResults.filter((r) => r[key] !== null && r[key] !== undefined)
+          .length;
+      }
+      return allResults.length;
+
+    case "ABS":
+      if (row && args.length === 1 && args[0].type === "COLUMN") {
+        const arg = args[0];
+        const key = arg.table ? `${arg.table}.${arg.name}` : arg.name;
+        const value = row[key];
+        return Math.abs(Number(value));
+      }
+      throw new Error("ABS function requires a single column argument");
+
+    default:
+      throw new Error(`Unknown function: ${name}`);
+  }
 }
 
 function applyIndexForJoinValue<DataModel extends GenericDataModel>(

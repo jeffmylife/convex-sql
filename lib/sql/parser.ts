@@ -91,8 +91,27 @@ export class Parser {
     do {
       const first = this.consume("IDENTIFIER").value;
 
+      // Check for function call: identifier(
+      if (this.check("LPAREN")) {
+        this.advance(); // consume (
+        const args = this.parseFunctionArgs();
+        this.consume("RPAREN"); // consume )
+
+        let alias: string | undefined;
+        if (this.check("KEYWORD", "AS")) {
+          this.advance();
+          alias = this.consume("IDENTIFIER").value;
+        }
+
+        columns.push({
+          type: "FUNCTION",
+          name: first.toUpperCase(),
+          args,
+          alias,
+        });
+      }
       // Check for table.column or table.*
-      if (this.check("DOT")) {
+      else if (this.check("DOT")) {
         this.advance();
 
         if (this.check("STAR")) {
@@ -123,6 +142,37 @@ export class Parser {
     } while (this.match("COMMA"));
 
     return columns;
+  }
+
+  private parseFunctionArgs(): ColumnExpression[] {
+    const args: ColumnExpression[] = [];
+
+    if (!this.check("RPAREN")) {
+      // If not empty args
+      do {
+        if (this.check("STAR")) {
+          this.advance();
+          args.push({ type: "STAR" });
+        } else {
+          const first = this.consume("IDENTIFIER").value;
+
+          if (this.check("DOT")) {
+            this.advance();
+            if (this.check("STAR")) {
+              this.advance();
+              args.push({ type: "TABLE_STAR", table: first });
+            } else {
+              const column = this.consume("IDENTIFIER").value;
+              args.push({ type: "COLUMN", table: first, name: column });
+            }
+          } else {
+            args.push({ type: "COLUMN", name: first });
+          }
+        }
+      } while (this.match("COMMA"));
+    }
+
+    return args;
   }
 
   private parseJoin(): JoinClause {

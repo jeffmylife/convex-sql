@@ -29,7 +29,13 @@ export type JoinCondition = {
 export type ColumnExpression =
   | { type: "STAR" }
   | { type: "TABLE_STAR"; table: string }
-  | { type: "COLUMN"; table?: string; name: string; alias?: string };
+  | { type: "COLUMN"; table?: string; name: string; alias?: string }
+  | {
+      type: "FUNCTION";
+      name: string;
+      args: ColumnExpression[];
+      alias?: string;
+    };
 
 export type WhereClause = {
   type: "AND" | "OR" | "COMPARISON";

@@ -48,6 +48,10 @@ FROM users@by_status
 INNER JOIN posts@by_author ON users._id = posts.authorId
 WHERE users.status = 'active'`,
 
+  "SELECT COUNT(*) FROM users",
+
+  "SELECT COUNT(*), ABS(age) FROM users WHERE age < 0",
+
   `SELECT users.name, posts.title
 FROM users
 INNER JOIN posts ON users._id = posts.authorId
