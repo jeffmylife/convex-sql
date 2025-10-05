@@ -4,6 +4,8 @@ const KEYWORDS = new Set([
   "SELECT",
   "FROM",
   "WHERE",
+  "GROUP",
+  "HAVING",
   "ORDER",
   "BY",
   "LIMIT",

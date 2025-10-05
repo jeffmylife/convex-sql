@@ -4,6 +4,7 @@ import {
   WhereClause,
   JoinClause,
   ColumnExpression,
+  GroupByClause,
 } from "../../lib/sql/types";
 import { GenericDataModel, TableNamesInDataModel } from "convex/server";
 import schema from "../schema.js";
@@ -241,6 +242,11 @@ export async function executeSelect<DataModel extends GenericDataModel>(
     }
   }
 
+  // Apply GROUP BY if present
+  if (statement.groupBy && statement.groupBy.length > 0) {
+    return applyGroupBy(results, statement);
+  }
+
   // Apply column selection
   return projectColumns(results, statement.columns, statement.from);
 }
@@ -285,7 +291,12 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
     );
   }
 
-  // 3. Apply column projection
+  // 3. Apply GROUP BY if present
+  if (statement.groupBy && statement.groupBy.length > 0) {
+    return applyGroupBy(leftResults, statement);
+  }
+
+  // 4. Apply column projection
   return projectColumns(
     leftResults,
     statement.columns,
@@ -373,6 +384,171 @@ async function performJoin<DataModel extends GenericDataModel>(
   }
 
   return joined;
+}
+
+function applyGroupBy(results: any[], statement: SelectStatement): any[] {
+  if (!statement.groupBy || statement.groupBy.length === 0) {
+    return results;
+  }
+
+  // Build group key for each row
+  const groups = new Map<string, any[]>();
+
+  for (const row of results) {
+    const keyParts: Array<string> = [];
+
+    for (const groupCol of statement.groupBy) {
+      const key = groupCol.table
+        ? `${groupCol.table}.${groupCol.field}`
+        : groupCol.field;
+      const value = row[key] ?? row[groupCol.field];
+      // Use JSON.stringify to handle complex values
+      keyParts.push(JSON.stringify(value));
+    }
+
+    const groupKey = keyParts.join(":::");
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, []);
+    }
+    groups.get(groupKey)!.push(row);
+  }
+
+  // Build result rows for each group
+  const groupedResults: Array<any> = [];
+
+  for (const [groupKey, groupRows] of groups.entries()) {
+    const resultRow: any = {};
+
+    // Add GROUP BY columns to the result
+    const groupByColumns: GroupByClause[] = statement.groupBy;
+    for (const groupCol of groupByColumns) {
+      const key = groupCol.table
+        ? `${groupCol.table}.${groupCol.field}`
+        : groupCol.field;
+      const value = groupRows[0][key] ?? groupRows[0][groupCol.field];
+      resultRow[key] = value;
+    }
+
+    // Compute aggregates for each column in SELECT
+    for (const col of statement.columns) {
+      if (col.type === "FUNCTION") {
+        const functionKey = `${col.name}(${formatFunctionArgs(col.args)})`;
+        const outputKey = col.alias || functionKey;
+        const value = executeFunction(col.name, col.args, null, groupRows);
+
+        resultRow[outputKey] = value;
+        // Also store with function key for HAVING clause to find it
+        if (col.alias && outputKey !== functionKey) {
+          resultRow[functionKey] = value;
+        }
+      } else if (col.type === "COLUMN") {
+        // Non-aggregate column must be in GROUP BY
+        const colKey = col.table ? `${col.table}.${col.name}` : col.name;
+        const isInGroupBy = statement.groupBy.some(
+          (g) =>
+            g.field === col.name &&
+            (g.table === col.table || (!g.table && !col.table)),
+        );
+
+        if (!isInGroupBy) {
+          throw new Error(
+            `Column '${colKey}' must appear in GROUP BY clause or be used in an aggregate function`,
+          );
+        }
+
+        const outputKey = col.alias || col.name;
+        resultRow[outputKey] = resultRow[colKey] ?? groupRows[0][col.name];
+      } else if (col.type === "STAR" || col.type === "TABLE_STAR") {
+        throw new Error(
+          "SELECT * is not allowed with GROUP BY. Specify columns explicitly.",
+        );
+      }
+    }
+
+    groupedResults.push(resultRow);
+  }
+
+  // Apply HAVING filter if present
+  let filteredResults = groupedResults;
+  if (statement.having) {
+    filteredResults = groupedResults.filter((row) =>
+      evaluateHaving(row, statement.having!),
+    );
+  }
+
+  // Clean up: remove duplicate function keys that were only added for HAVING
+  const cleanedResults = filteredResults.map((row) => {
+    const cleanRow: any = {};
+    for (const col of statement.columns) {
+      if (col.type === "FUNCTION") {
+        const outputKey = col.alias || `${col.name}(${formatFunctionArgs(col.args)})`;
+        cleanRow[outputKey] = row[outputKey];
+      } else if (col.type === "COLUMN") {
+        const outputKey = col.alias || col.name;
+        const sourceKey = col.table ? `${col.table}.${col.name}` : col.name;
+        cleanRow[outputKey] = row[sourceKey] ?? row[col.name];
+      }
+    }
+    // Also include GROUP BY columns (we know groupBy exists due to function guard)
+    if (statement.groupBy) {
+      for (const groupCol of statement.groupBy) {
+        const key = groupCol.table ? `${groupCol.table}.${groupCol.field}` : groupCol.field;
+        if (!(key in cleanRow)) {
+          cleanRow[key] = row[key];
+        }
+      }
+    }
+    return cleanRow;
+  });
+
+  return cleanedResults;
+}
+
+function evaluateHaving(row: any, having: WhereClause): boolean {
+  if (having.type === "COMPARISON") {
+    const value = row[having.field!];
+    const compareValue = having.value;
+
+    switch (having.operator) {
+      case "=":
+        return value === compareValue;
+      case "!=":
+        return value !== compareValue;
+      case ">":
+        if (compareValue === null || compareValue === undefined) {
+          return false;
+        }
+        return value > compareValue;
+      case "<":
+        if (compareValue === null || compareValue === undefined) {
+          return false;
+        }
+        return value < compareValue;
+      case ">=":
+        if (compareValue === null || compareValue === undefined) {
+          return false;
+        }
+        return value >= compareValue;
+      case "<=":
+        if (compareValue === null || compareValue === undefined) {
+          return false;
+        }
+        return value <= compareValue;
+      default:
+        throw new Error(`Unknown operator: ${having.operator}`);
+    }
+  } else if (having.type === "AND") {
+    return (
+      evaluateHaving(row, having.left!) && evaluateHaving(row, having.right!)
+    );
+  } else if (having.type === "OR") {
+    return (
+      evaluateHaving(row, having.left!) || evaluateHaving(row, having.right!)
+    );
+  }
+
+  throw new Error(`Unknown HAVING clause type: ${having.type}`);
 }
 
 function projectColumns(
@@ -624,14 +800,59 @@ function executeFunction(
       if (args.length === 1 && args[0].type === "STAR") {
         return allResults.length;
       }
-      // For now, just return the count of non-null values
-      const arg = args[0];
-      if (arg && arg.type === "COLUMN") {
-        const key = arg.table ? `${arg.table}.${arg.name}` : arg.name;
+      // Count non-null values in the specified column
+      const countArg = args[0];
+      if (countArg && countArg.type === "COLUMN") {
+        const key = countArg.table ? `${countArg.table}.${countArg.name}` : countArg.name;
         return allResults.filter((r) => r[key] !== null && r[key] !== undefined)
           .length;
       }
       return allResults.length;
+
+    case "SUM":
+      if (args.length === 1 && args[0].type === "COLUMN") {
+        const arg = args[0];
+        const key = arg.table ? `${arg.table}.${arg.name}` : arg.name;
+        return allResults.reduce((sum, r) => {
+          const value = r[key];
+          return sum + (value !== null && value !== undefined ? Number(value) : 0);
+        }, 0);
+      }
+      throw new Error("SUM function requires a single column argument");
+
+    case "AVG":
+      if (args.length === 1 && args[0].type === "COLUMN") {
+        const arg = args[0];
+        const key = arg.table ? `${arg.table}.${arg.name}` : arg.name;
+        const values = allResults
+          .map((r) => r[key])
+          .filter((v) => v !== null && v !== undefined)
+          .map(Number);
+        return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+      }
+      throw new Error("AVG function requires a single column argument");
+
+    case "MIN":
+      if (args.length === 1 && args[0].type === "COLUMN") {
+        const arg = args[0];
+        const key = arg.table ? `${arg.table}.${arg.name}` : arg.name;
+        const values = allResults
+          .map((r) => r[key])
+          .filter((v) => v !== null && v !== undefined);
+        return values.length > 0 ? Math.min(...values.map(Number)) : null;
+      }
+      throw new Error("MIN function requires a single column argument");
+
+    case "MAX":
+      if (args.length === 1 && args[0].type === "COLUMN") {
+        const arg = args[0];
+        const key = arg.table ? `${arg.table}.${arg.name}` : arg.name;
+        const values = allResults
+          .map((r) => r[key])
+          .filter((v) => v !== null && v !== undefined);
+        return values.length > 0 ? Math.max(...values.map(Number)) : null;
+      }
+      throw new Error("MAX function requires a single column argument");
 
     case "ABS":
       if (row && args.length === 1 && args[0].type === "COLUMN") {

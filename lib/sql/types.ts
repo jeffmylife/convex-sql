@@ -7,6 +7,8 @@ export type SelectStatement = {
   fromIndex?: string; // Index for the main table
   joins?: JoinClause[];
   where?: WhereClause;
+  groupBy?: GroupByClause[];
+  having?: WhereClause; // Same structure as WHERE but applied after grouping
   orderBy?: OrderByClause[];
   limit?: number;
 };
@@ -51,6 +53,11 @@ export type OrderByClause = {
   table?: string;
   field: string;
   direction: "asc" | "desc";
+};
+
+export type GroupByClause = {
+  table?: string;
+  field: string;
 };
 
 export type Token = {

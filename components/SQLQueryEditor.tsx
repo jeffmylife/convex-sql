@@ -63,6 +63,28 @@ INNER JOIN posts ON users._id = posts.authorId
 WHERE posts.published = true`,
 
   "SELECT * FROM posts\nWHERE published = true",
+
+  `SELECT status, COUNT(*) AS user_count
+FROM users
+GROUP BY status`,
+
+  `SELECT status, AVG(age) AS avg_age
+FROM users
+GROUP BY status`,
+
+  `SELECT status, MIN(age) AS min_age, MAX(age) AS max_age
+FROM users
+GROUP BY status`,
+
+  `SELECT status, COUNT(*) AS count
+FROM users
+GROUP BY status
+HAVING COUNT(*) > 1`,
+
+  `SELECT status, SUM(age) AS total_age
+FROM users
+GROUP BY status
+HAVING SUM(age) > 50`,
 ];
 
 export function SQLQueryEditor() {

@@ -5,6 +5,7 @@ import {
   WhereClause,
   OrderByClause,
   JoinClause,
+  GroupByClause,
 } from "./types";
 
 export class Parser {
@@ -39,6 +40,19 @@ export class Parser {
       where = this.parseWhere();
     }
 
+    let groupBy: GroupByClause[] | undefined;
+    if (this.check("KEYWORD", "GROUP")) {
+      this.advance();
+      this.consume("KEYWORD", "BY");
+      groupBy = this.parseGroupBy();
+    }
+
+    let having: WhereClause | undefined;
+    if (this.check("KEYWORD", "HAVING")) {
+      this.advance();
+      having = this.parseWhere(); // HAVING uses same structure as WHERE
+    }
+
     let orderBy: OrderByClause[] | undefined;
     if (this.check("KEYWORD", "ORDER")) {
       this.advance();
@@ -62,6 +76,8 @@ export class Parser {
       fromIndex,
       joins: joins.length > 0 ? joins : undefined,
       where,
+      groupBy,
+      having,
       orderBy,
       limit,
     };
@@ -245,8 +261,17 @@ export class Parser {
     let table: string | undefined;
     let field: string;
 
+    // Check for function call (e.g., COUNT(*), SUM(age))
+    if (this.check("LPAREN")) {
+      this.advance(); // consume (
+      const args = this.parseFunctionArgs();
+      this.consume("RPAREN"); // consume )
+
+      // For HAVING clauses, we use the function call as the field name
+      field = `${first}(${this.formatFunctionArgsForComparison(args)})`;
+    }
     // Check for table.field syntax
-    if (this.check("DOT")) {
+    else if (this.check("DOT")) {
       this.advance();
       table = first;
       field = this.consume("IDENTIFIER").value;
@@ -287,6 +312,49 @@ export class Parser {
       operator,
       value,
     };
+  }
+
+  private formatFunctionArgsForComparison(args: ColumnExpression[]): string {
+    return args
+      .map((arg) => {
+        switch (arg.type) {
+          case "STAR":
+            return "*";
+          case "TABLE_STAR":
+            return `${arg.table}.*`;
+          case "COLUMN":
+            return arg.table ? `${arg.table}.${arg.name}` : arg.name;
+          case "FUNCTION":
+            return `${arg.name}(${this.formatFunctionArgsForComparison(arg.args)})`;
+          default:
+            return "?";
+        }
+      })
+      .join(", ");
+  }
+
+  private parseGroupBy(): GroupByClause[] {
+    const groupBy: GroupByClause[] = [];
+
+    do {
+      const first = this.consume("IDENTIFIER").value;
+
+      let table: string | undefined;
+      let field: string;
+
+      // Check for table.field syntax
+      if (this.check("DOT")) {
+        this.advance();
+        table = first;
+        field = this.consume("IDENTIFIER").value;
+      } else {
+        field = first;
+      }
+
+      groupBy.push({ table, field });
+    } while (this.match("COMMA"));
+
+    return groupBy;
   }
 
   private parseOrderBy(): OrderByClause[] {
