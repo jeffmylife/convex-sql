@@ -89,8 +89,10 @@ export function SQLQueryEditor() {
   const [autoExecute, setAutoExecute] = useState(false);
   const [isValidSyntax, setIsValidSyntax] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [executionTime, setExecutionTime] = useState<number | null>(null);
   const previousResults = useRef<any[] | null>(null);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const queryStartTime = useRef<number | null>(null);
 
   const seedDatabase = useMutation(api.seedData.seedDatabase);
   const clearDatabase = useMutation(api.seedData.clearDatabase);
@@ -114,6 +116,8 @@ export function SQLQueryEditor() {
     setExecutedQuery(sql);
     previousResults.current = null; // Reset tracking on new query
     setChangedRows(new Set());
+    queryStartTime.current = performance.now();
+    setExecutionTime(null);
   };
 
   // Auto-execute effect with debouncing
@@ -141,6 +145,8 @@ export function SQLQueryEditor() {
       setExecutedQuery(sql);
       previousResults.current = null; // Reset tracking on new query
       setChangedRows(new Set());
+      queryStartTime.current = performance.now();
+      setExecutionTime(null);
     }, 500); // 500ms debounce
 
     return () => {
@@ -165,8 +171,15 @@ export function SQLQueryEditor() {
     setMounted(true);
   }, []);
 
-  // Track changes in results
+  // Track changes in results and measure execution time
   useEffect(() => {
+    // Calculate execution time when query completes
+    if (response !== undefined && queryStartTime.current !== null) {
+      const elapsed = performance.now() - queryStartTime.current;
+      setExecutionTime(elapsed);
+      queryStartTime.current = null;
+    }
+
     if (results && results.length > 0) {
       setLastUpdated(new Date());
 
@@ -193,7 +206,7 @@ export function SQLQueryEditor() {
 
       previousResults.current = results;
     }
-  }, [results]);
+  }, [results, response]);
 
   return (
     <div className="flex flex-col gap-6 w-full">
@@ -332,6 +345,14 @@ export function SQLQueryEditor() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            {executionTime !== null && (
+              <Badge variant="outline" className="font-mono">
+                {executionTime < 1000
+                  ? `${executionTime.toFixed(0)}ms`
+                  : `${(executionTime / 1000).toFixed(2)}s`
+                }
+              </Badge>
+            )}
             {lastUpdated && (
               <span className="text-xs text-[var(--color-muted-foreground)]">
                 Updated {lastUpdated.toLocaleTimeString()}
