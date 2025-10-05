@@ -5,6 +5,7 @@ import {
   JoinClause,
   ColumnExpression,
   GroupByClause,
+  OrderByClause,
 } from "../../lib/sql/types";
 import { GenericDataModel, TableNamesInDataModel } from "convex/server";
 import schema from "../schema.js";
@@ -265,12 +266,32 @@ export async function executeSelect<DataModel extends GenericDataModel>(
     }
   }
 
-  // Apply ORDER BY and execute query with error handling for non-existent tables
+  // Determine if we can use Convex's built-in ordering
+  let canUseConvexOrdering = false;
+  if (statement.orderBy && statement.orderBy.length > 0) {
+    const firstOrder = statement.orderBy[0];
+
+    // Can use Convex ordering if:
+    // 1. Ordering by _creationTime (default Convex ordering)
+    // 2. Using an index and ordering by the first field of that index
+    if (firstOrder.field === "_creationTime") {
+      canUseConvexOrdering = true;
+    } else if (statement.fromIndex) {
+      const indexRegistry = getIndexRegistry();
+      const indexColumns = indexRegistry[statement.from]?.[statement.fromIndex] || [];
+      // Can only use Convex ordering if ORDER BY field is the first (or only) index field
+      if (indexColumns.length > 0 && indexColumns[0] === firstOrder.field) {
+        canUseConvexOrdering = true;
+      }
+    }
+  }
+
+  // Execute query with error handling for non-existent tables
   let results;
   try {
-    if (statement.orderBy && statement.orderBy.length > 0) {
-      const firstOrder = statement.orderBy[0];
-      const orderedQuery = query.order(firstOrder.direction);
+    if (canUseConvexOrdering && statement.orderBy && statement.orderBy.length > 0) {
+      const direction = statement.orderBy[0].direction;
+      const orderedQuery = query.order(direction);
 
       if (statement.limit) {
         results = await orderedQuery.take(statement.limit);
@@ -278,11 +299,8 @@ export async function executeSelect<DataModel extends GenericDataModel>(
         results = await orderedQuery.collect();
       }
     } else {
-      if (statement.limit) {
-        results = await query.take(statement.limit);
-      } else {
-        results = await query.collect();
-      }
+      // Collect all results, we'll sort in-memory if needed
+      results = await query.collect();
     }
   } catch (error: any) {
     // Detect Convex's error for non-existent tables
@@ -290,6 +308,16 @@ export async function executeSelect<DataModel extends GenericDataModel>(
       throw new Error(`Table '${statement.from}' does not exist`);
     }
     throw error;
+  }
+
+  // Apply in-memory ORDER BY if we couldn't use Convex's built-in ordering
+  if (!canUseConvexOrdering && statement.orderBy && statement.orderBy.length > 0) {
+    results = applyOrderBy(results, statement.orderBy);
+  }
+
+  // Apply LIMIT if we didn't use Convex ordering (which already applied it)
+  if (!canUseConvexOrdering && statement.limit) {
+    results = results.slice(0, statement.limit);
   }
 
   // Apply GROUP BY if present
@@ -365,8 +393,12 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
   // 3. Apply GROUP BY if present
   if (statement.groupBy && statement.groupBy.length > 0) {
     const grouped = applyGroupBy(leftResults, statement);
-    // Apply LIMIT after grouping
-    return statement.limit ? grouped.slice(0, statement.limit) : grouped;
+    // Apply ORDER BY to grouped results
+    const ordered = statement.orderBy
+      ? applyOrderBy(grouped, statement.orderBy)
+      : grouped;
+    // Apply LIMIT after grouping and ordering
+    return statement.limit ? ordered.slice(0, statement.limit) : ordered;
   }
 
   // 4. Apply column projection
@@ -377,8 +409,13 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
     statement.joins,
   );
 
-  // 5. Apply LIMIT to final result (correct SQL semantics)
-  return statement.limit ? projected.slice(0, statement.limit) : projected;
+  // 5. Apply ORDER BY (correct SQL semantics: ORDER BY happens before LIMIT)
+  const ordered = statement.orderBy
+    ? applyOrderBy(projected, statement.orderBy)
+    : projected;
+
+  // 6. Apply LIMIT to final result
+  return statement.limit ? ordered.slice(0, statement.limit) : ordered;
 }
 
 async function performJoin<DataModel extends GenericDataModel>(
@@ -518,6 +555,47 @@ async function performJoin<DataModel extends GenericDataModel>(
   }
 
   return joined;
+}
+
+function applyOrderBy(results: any[], orderBy: OrderByClause[]): any[] {
+  if (orderBy.length === 0) {
+    return results;
+  }
+
+  return results.slice().sort((a, b) => {
+    for (const order of orderBy) {
+      // Get the field key (with table prefix if specified)
+      const key = order.table ? `${order.table}.${order.field}` : order.field;
+
+      // Try to get value from row (with or without prefix)
+      let aVal = a[key] ?? a[order.field];
+      let bVal = b[key] ?? b[order.field];
+
+      // Handle null/undefined values (SQL semantics: nulls sort last in ASC, first in DESC)
+      const aIsNull = aVal === null || aVal === undefined;
+      const bIsNull = bVal === null || bVal === undefined;
+
+      if (aIsNull && bIsNull) continue;
+      if (aIsNull) return order.direction === "asc" ? 1 : -1;
+      if (bIsNull) return order.direction === "asc" ? -1 : 1;
+
+      // Compare values
+      let comparison = 0;
+      if (typeof aVal === "string" && typeof bVal === "string") {
+        comparison = aVal.localeCompare(bVal);
+      } else if (typeof aVal === "number" && typeof bVal === "number") {
+        comparison = aVal - bVal;
+      } else {
+        // Fallback: convert to string for comparison
+        comparison = String(aVal).localeCompare(String(bVal));
+      }
+
+      if (comparison !== 0) {
+        return order.direction === "asc" ? comparison : -comparison;
+      }
+    }
+    return 0;
+  });
 }
 
 function applyGroupBy(results: any[], statement: SelectStatement): any[] {

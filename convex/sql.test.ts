@@ -193,6 +193,36 @@ HAVING COUNT(*) > 1`,
     }
   });
 
+  test("ORDER BY: Sort by name ascending", async () => {
+    const result = await t.query(api.sqlQueries.runSQL, {
+      sql: "SELECT name FROM users ORDER BY name ASC LIMIT 5",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.length).toBe(5);
+      // Check that names are in ascending order
+      for (let i = 1; i < result.data.length; i++) {
+        expect(result.data[i].name >= result.data[i - 1].name).toBe(true);
+      }
+    }
+  });
+
+  test("ORDER BY: Sort by age descending with index", async () => {
+    const result = await t.query(api.sqlQueries.runSQL, {
+      sql: "SELECT name, age FROM users@by_status_and_age WHERE status = 'active' ORDER BY age DESC LIMIT 5",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.length).toBeGreaterThan(0);
+      // Check that ages are in descending order
+      for (let i = 1; i < result.data.length; i++) {
+        expect(result.data[i].age <= result.data[i - 1].age).toBe(true);
+      }
+    }
+  });
+
   test("Error handling: Invalid SQL", async () => {
     const result = await t.query(api.sqlQueries.runSQL, {
       sql: "INVALID SQL QUERY",
