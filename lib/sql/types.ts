@@ -17,7 +17,7 @@ export type JoinClause = {
   type: "INNER";
   table: string;
   index?: string; // Index for this joined table
-  on: JoinCondition;
+  on: JoinCondition[]; // Support multiple equality conditions combined with AND
 };
 
 export type JoinCondition = {

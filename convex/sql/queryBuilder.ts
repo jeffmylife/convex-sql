@@ -241,11 +241,15 @@ export async function executeSelect<DataModel extends GenericDataModel>(
     // Also apply any WHERE conditions not covered by the index
     if (statement.where) {
       const indexRegistry = getIndexRegistry();
-      const indexColumns = indexRegistry[statement.from]?.[statement.fromIndex] || [];
+      const indexColumns =
+        indexRegistry[statement.from]?.[statement.fromIndex] || [];
       const indexedFields = new Set(indexColumns);
 
       // Check if WHERE has conditions not in the index
-      const hasNonIndexedConditions = hasConditionsNotInIndex(statement.where, indexedFields);
+      const hasNonIndexedConditions = hasConditionsNotInIndex(
+        statement.where,
+        indexedFields,
+      );
       if (hasNonIndexedConditions) {
         query = query.filter((q) =>
           buildFilterExpression(q, statement.where!, statement.from),
@@ -343,7 +347,9 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
     }
     throw error;
   }
-  console.log(`[SQL] Left table (${statement.from}): ${leftResults.length} rows`);
+  console.log(
+    `[SQL] Left table (${statement.from}): ${leftResults.length} rows`,
+  );
 
   // 2. For each JOIN, fetch and merge data
   for (const join of statement.joins!) {
@@ -387,6 +393,21 @@ async function performJoin<DataModel extends GenericDataModel>(
   // Simple SQL semantics: Read the right table
   let rightQuery = ctx.db.query(rightTableName);
 
+  // Apply index hint on the right table if provided and usable
+  if (join.index) {
+    try {
+      rightQuery = applyIndex(
+        ctx,
+        rightQuery,
+        join.table,
+        join.index,
+        globalWhereClause,
+      );
+    } catch (_e) {
+      // If index application fails (e.g., missing prefix), fall back silently
+    }
+  }
+
   // Apply any WHERE conditions that apply to this joined table
   if (globalWhereClause) {
     rightQuery = rightQuery.filter((q) =>
@@ -407,40 +428,92 @@ async function performJoin<DataModel extends GenericDataModel>(
   }
   console.log(`[SQL] Right table (${join.table}): ${rightResults.length} rows`);
 
-  // Create index map for O(1) lookup during join
-  const rightMap = new Map<any, any[]>();
-  for (const rightRow of rightResults) {
-    const key = rightRow[join.on.rightField];
-    if (!rightMap.has(key)) {
-      rightMap.set(key, []);
+  // Build lookup maps for each equality to speed up multi-condition joins
+  const onConditions = Array.isArray(join.on) ? join.on : [join.on];
+
+  // For single-condition fast path
+  let singleMap: Map<any, any[]> | null = null;
+  if (onConditions.length === 1) {
+    const cond = onConditions[0];
+    if (cond.rightTable === join.table) {
+      singleMap = new Map<any, any[]>();
+      for (const rightRow of rightResults) {
+        const key = rightRow[cond.rightField];
+        if (!singleMap.has(key)) singleMap.set(key, []);
+        singleMap.get(key)!.push(rightRow);
+      }
     }
-    rightMap.get(key)!.push(rightRow);
   }
 
   // Perform INNER JOIN in memory
   const joined: any[] = [];
 
+  function getValue(
+    leftRow: any,
+    rightRow: any,
+    table: string,
+    field: string,
+  ): any {
+    if (table === join.table) {
+      return rightRow[field];
+    }
+    // Value should come from the accumulated left row
+    const prefixedKey = `${table}.${field}`;
+    if (prefixedKey in leftRow) return leftRow[prefixedKey];
+    // For the root FROM table, left rows may be unprefixed initially
+    if (table === fromTable && field in leftRow) return leftRow[field];
+    return undefined;
+  }
+
   for (const leftRow of leftResults) {
-    const leftKey = leftRow[join.on.leftField];
-    const matchingRightRows = rightMap.get(leftKey);
+    let candidates: any[] = rightResults;
 
-    if (matchingRightRows) {
-      for (const rightRow of matchingRightRows) {
-        // Merge rows with table prefixes
-        const mergedRow: any = {};
+    if (singleMap) {
+      const cond = onConditions[0];
+      const leftKey = getValue(leftRow, null, cond.leftTable, cond.leftField);
+      const byKey = singleMap.get(leftKey) || [];
+      candidates = byKey;
+    }
 
-        // Add left table fields with prefix
-        for (const [key, value] of Object.entries(leftRow)) {
+    for (const rightRow of candidates) {
+      // Verify all ON conditions
+      let matches = true;
+      for (const cond of onConditions) {
+        const leftVal = getValue(
+          leftRow,
+          rightRow,
+          cond.leftTable,
+          cond.leftField,
+        );
+        const rightVal = getValue(
+          leftRow,
+          rightRow,
+          cond.rightTable,
+          cond.rightField,
+        );
+        if (leftVal !== rightVal) {
+          matches = false;
+          break;
+        }
+      }
+      if (!matches) continue;
+
+      // Merge rows with table prefixes, preserving already-prefixed keys on left
+      const mergedRow: any = {};
+
+      for (const [key, value] of Object.entries(leftRow)) {
+        if (key.includes(".")) {
+          mergedRow[key] = value; // already prefixed from prior join
+        } else {
           mergedRow[`${fromTable}.${key}`] = value;
         }
-
-        // Add right table fields with prefix
-        for (const [key, value] of Object.entries(rightRow)) {
-          mergedRow[`${join.table}.${key}`] = value;
-        }
-
-        joined.push(mergedRow);
       }
+
+      for (const [key, value] of Object.entries(rightRow)) {
+        mergedRow[`${join.table}.${key}`] = value;
+      }
+
+      joined.push(mergedRow);
     }
   }
 
@@ -543,7 +616,8 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
     const cleanRow: any = {};
     for (const col of statement.columns) {
       if (col.type === "FUNCTION") {
-        const outputKey = col.alias || `${col.name}(${formatFunctionArgs(col.args)})`;
+        const outputKey =
+          col.alias || `${col.name}(${formatFunctionArgs(col.args)})`;
         cleanRow[outputKey] = row[outputKey];
       } else if (col.type === "COLUMN") {
         const outputKey = col.alias || col.name;
@@ -554,7 +628,9 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
     // Also include GROUP BY columns (we know groupBy exists due to function guard)
     if (statement.groupBy) {
       for (const groupCol of statement.groupBy) {
-        const key = groupCol.table ? `${groupCol.table}.${groupCol.field}` : groupCol.field;
+        const key = groupCol.table
+          ? `${groupCol.table}.${groupCol.field}`
+          : groupCol.field;
         if (!(key in cleanRow)) {
           cleanRow[key] = row[key];
         }
@@ -780,7 +856,9 @@ function executeFunction(
       // Count non-null values in the specified column
       const countArg = args[0];
       if (countArg && countArg.type === "COLUMN") {
-        const key = countArg.table ? `${countArg.table}.${countArg.name}` : countArg.name;
+        const key = countArg.table
+          ? `${countArg.table}.${countArg.name}`
+          : countArg.name;
         return allResults.filter((r) => r[key] !== null && r[key] !== undefined)
           .length;
       }
@@ -792,7 +870,9 @@ function executeFunction(
         const key = arg.table ? `${arg.table}.${arg.name}` : arg.name;
         return allResults.reduce((sum, r) => {
           const value = r[key];
-          return sum + (value !== null && value !== undefined ? Number(value) : 0);
+          return (
+            sum + (value !== null && value !== undefined ? Number(value) : 0)
+          );
         }, 0);
       }
       throw new Error("SUM function requires a single column argument");
@@ -805,7 +885,9 @@ function executeFunction(
           .map((r) => r[key])
           .filter((v) => v !== null && v !== undefined)
           .map(Number);
-        return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+        return values.length > 0
+          ? values.reduce((a, b) => a + b, 0) / values.length
+          : null;
       }
       throw new Error("AVG function requires a single column argument");
 
@@ -844,4 +926,3 @@ function executeFunction(
       throw new Error(`Unknown function: ${name}`);
   }
 }
-

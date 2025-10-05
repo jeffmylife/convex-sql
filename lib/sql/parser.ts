@@ -199,31 +199,45 @@ export class Parser {
 
     this.consume("KEYWORD", "ON");
 
-    // Parse: leftTable.leftField = rightTable.rightField
-    const leftTable = this.consume("IDENTIFIER").value;
-    this.consume("DOT");
-    const leftField = this.consume("IDENTIFIER").value;
+    const conditions: any[] = [];
 
-    const operator = this.consume("OPERATOR").value;
-    if (operator !== "=") {
-      throw new Error(`JOIN only supports '=' operator, got '${operator}'`);
-    }
+    const parseJoinEquality = () => {
+      const leftTable = this.consume("IDENTIFIER").value;
+      this.consume("DOT");
+      const leftField = this.consume("IDENTIFIER").value;
 
-    const rightTable = this.consume("IDENTIFIER").value;
-    this.consume("DOT");
-    const rightField = this.consume("IDENTIFIER").value;
+      const operator = this.consume("OPERATOR").value;
+      if (operator !== "=") {
+        throw new Error(`JOIN only supports '=' operator, got '${operator}'`);
+      }
 
-    return {
-      type: "INNER",
-      table,
-      index,
-      on: {
+      const rightTable = this.consume("IDENTIFIER").value;
+      this.consume("DOT");
+      const rightField = this.consume("IDENTIFIER").value;
+
+      conditions.push({
         leftTable,
         leftField,
         operator: "=",
         rightTable,
         rightField,
-      },
+      });
+    };
+
+    // First equality
+    parseJoinEquality();
+
+    // Additional equalities chained with AND
+    while (this.check("KEYWORD", "AND")) {
+      this.advance();
+      parseJoinEquality();
+    }
+
+    return {
+      type: "INNER",
+      table,
+      index,
+      on: conditions,
     };
   }
 
