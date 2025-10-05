@@ -50,7 +50,7 @@ FROM users
 INNER JOIN posts ON users._id = posts.authorId`,
   },
   {
-    label: "JOIN: With index optimization",
+    label: "JOIN: With WHERE filter",
     query: `SELECT users.name, posts.title
 FROM users@by_status
 INNER JOIN posts@by_author ON users._id = posts.authorId

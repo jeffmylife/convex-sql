@@ -278,7 +278,16 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
     }
   }
 
-  let leftResults = await leftQuery.collect();
+  // For JOINs, apply a safety limit to left table to prevent document read explosions
+  // Users should add explicit LIMIT clauses for large JOIN queries
+  let leftResults: any[];
+  const JOIN_SAFETY_LIMIT = 100;
+
+  if (statement.joins && statement.joins.length > 0) {
+    leftResults = await leftQuery.take(JOIN_SAFETY_LIMIT);
+  } else {
+    leftResults = await leftQuery.collect();
+  }
 
   // 2. For each JOIN, fetch and merge data
   for (const join of statement.joins!) {
@@ -293,16 +302,21 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
 
   // 3. Apply GROUP BY if present
   if (statement.groupBy && statement.groupBy.length > 0) {
-    return applyGroupBy(leftResults, statement);
+    const grouped = applyGroupBy(leftResults, statement);
+    // Apply LIMIT after grouping
+    return statement.limit ? grouped.slice(0, statement.limit) : grouped;
   }
 
   // 4. Apply column projection
-  return projectColumns(
+  const projected = projectColumns(
     leftResults,
     statement.columns,
     statement.from,
     statement.joins,
   );
+
+  // 5. Apply LIMIT to final result (correct SQL semantics)
+  return statement.limit ? projected.slice(0, statement.limit) : projected;
 }
 
 async function performJoin<DataModel extends GenericDataModel>(
@@ -322,9 +336,13 @@ async function performJoin<DataModel extends GenericDataModel>(
     // Check if we can extract join key values from left results
     const leftJoinValues = extractJoinValues(leftResults, join.on.leftField);
 
-    if (leftJoinValues.length > 0) {
-      // Use index optimization for all datasets - indexes provide better performance
-      // by only fetching relevant data instead of entire tables
+    // Only use indexed join for small datasets to avoid exceeding read limits
+    // With parallel queries, even indexed reads count toward the 32k limit
+    // For larger datasets, in-memory join is more efficient
+    const MAX_INDEXED_JOIN_VALUES = 10;
+
+    if (leftJoinValues.length > 0 && leftJoinValues.length <= MAX_INDEXED_JOIN_VALUES) {
+      // Use index optimization only for very small datasets
       return await performOptimizedJoin(
         ctx,
         leftResults,
@@ -334,7 +352,7 @@ async function performJoin<DataModel extends GenericDataModel>(
         globalWhereClause,
       );
     }
-    // Fall back to in-memory join if no join values found
+    // Fall back to in-memory join for medium/large datasets
   }
 
   // Apply any WHERE conditions that apply to this joined table
@@ -344,7 +362,10 @@ async function performJoin<DataModel extends GenericDataModel>(
     );
   }
 
-  const rightResults = await rightQuery.collect();
+  // Use take() with a reasonable limit to prevent reading too many documents
+  // For in-memory joins, limit right table to prevent document read explosions
+  const MAX_RIGHT_TABLE_DOCS = 1000;
+  const rightResults = await rightQuery.take(MAX_RIGHT_TABLE_DOCS);
 
   // Create index map for right table for efficient lookup
   const rightMap = new Map<any, any[]>();
