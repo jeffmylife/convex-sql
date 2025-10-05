@@ -278,16 +278,9 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
     }
   }
 
-  // For JOINs, apply a safety limit to left table to prevent document read explosions
-  // Users should add explicit LIMIT clauses for large JOIN queries
-  let leftResults: any[];
-  const JOIN_SAFETY_LIMIT = 100;
-
-  if (statement.joins && statement.joins.length > 0) {
-    leftResults = await leftQuery.take(JOIN_SAFETY_LIMIT);
-  } else {
-    leftResults = await leftQuery.collect();
-  }
+  // For JOINs, collect left table results
+  let leftResults = await leftQuery.collect();
+  console.log(`[SQL] Left table (${statement.from}): ${leftResults.length} rows`);
 
   // 2. For each JOIN, fetch and merge data
   for (const join of statement.joins!) {
@@ -328,32 +321,8 @@ async function performJoin<DataModel extends GenericDataModel>(
 ): Promise<any[]> {
   const rightTableName = join.table as TableNamesInDataModel<DataModel>;
 
-  // Fetch from right table, potentially using an index
+  // Simple SQL semantics: Read the right table
   let rightQuery = ctx.db.query(rightTableName);
-
-  // Try to optimize JOIN with index if possible
-  if (join.index) {
-    // Check if we can extract join key values from left results
-    const leftJoinValues = extractJoinValues(leftResults, join.on.leftField);
-
-    // Only use indexed join for small datasets to avoid exceeding read limits
-    // With parallel queries, even indexed reads count toward the 32k limit
-    // For larger datasets, in-memory join is more efficient
-    const MAX_INDEXED_JOIN_VALUES = 10;
-
-    if (leftJoinValues.length > 0 && leftJoinValues.length <= MAX_INDEXED_JOIN_VALUES) {
-      // Use index optimization only for very small datasets
-      return await performOptimizedJoin(
-        ctx,
-        leftResults,
-        join,
-        fromTable,
-        leftJoinValues,
-        globalWhereClause,
-      );
-    }
-    // Fall back to in-memory join for medium/large datasets
-  }
 
   // Apply any WHERE conditions that apply to this joined table
   if (globalWhereClause) {
@@ -362,12 +331,11 @@ async function performJoin<DataModel extends GenericDataModel>(
     );
   }
 
-  // Use take() with a reasonable limit to prevent reading too many documents
-  // For in-memory joins, limit right table to prevent document read explosions
-  const MAX_RIGHT_TABLE_DOCS = 1000;
-  const rightResults = await rightQuery.take(MAX_RIGHT_TABLE_DOCS);
+  // Read right table
+  const rightResults = await rightQuery.collect();
+  console.log(`[SQL] Right table (${join.table}): ${rightResults.length} rows`);
 
-  // Create index map for right table for efficient lookup
+  // Create index map for O(1) lookup during join
   const rightMap = new Map<any, any[]>();
   for (const rightRow of rightResults) {
     const key = rightRow[join.on.rightField];
@@ -377,7 +345,7 @@ async function performJoin<DataModel extends GenericDataModel>(
     rightMap.get(key)!.push(rightRow);
   }
 
-  // Perform INNER JOIN
+  // Perform INNER JOIN in memory
   const joined: any[] = [];
 
   for (const leftRow of leftResults) {
@@ -706,90 +674,6 @@ function buildFilterExpression(
   throw new Error(`Unknown WHERE clause type: ${where.type}`);
 }
 
-function extractJoinValues(leftResults: any[], leftField: string): any[] {
-  const values = new Set<any>();
-  for (const row of leftResults) {
-    const value = row[leftField];
-    if (value !== undefined && value !== null) {
-      values.add(value);
-    }
-  }
-  return Array.from(values);
-}
-
-async function performOptimizedJoin<DataModel extends GenericDataModel>(
-  ctx: GenericQueryCtx<DataModel>,
-  leftResults: any[],
-  join: JoinClause,
-  fromTable: string,
-  leftJoinValues: any[],
-  globalWhereClause?: WhereClause,
-): Promise<any[]> {
-  const rightTableName = join.table as TableNamesInDataModel<DataModel>;
-
-  // Build queries for all join values in parallel
-  const queryPromises = leftJoinValues.map(async (joinValue) => {
-    let rightQuery = ctx.db.query(rightTableName);
-
-    // Apply the index filter for this specific join value
-    if (join.index) {
-      rightQuery = applyIndexForJoinValue(
-        ctx,
-        rightQuery,
-        join.table,
-        join.index,
-        join.on.rightField,
-        joinValue,
-      );
-    }
-
-    // Apply any global WHERE conditions
-    if (globalWhereClause) {
-      rightQuery = rightQuery.filter((q) =>
-        buildFilterExpression(q, globalWhereClause, join.table),
-      );
-    }
-
-    const rightResults = await rightQuery.collect();
-    return { joinValue, rightResults };
-  });
-
-  // Execute all queries in parallel
-  const queryResults = await Promise.all(queryPromises);
-
-  // Build the final joined results
-  const joined: any[] = [];
-
-  for (const { joinValue, rightResults } of queryResults) {
-    // Find matching left results for this join value
-    const matchingLeftResults = leftResults.filter(
-      (leftRow) => leftRow[join.on.leftField] === joinValue,
-    );
-
-    // Create joined rows
-    for (const leftRow of matchingLeftResults) {
-      for (const rightRow of rightResults) {
-        // Merge rows with table prefixes
-        const mergedRow: any = {};
-
-        // Add left table fields with prefix
-        for (const [key, value] of Object.entries(leftRow)) {
-          mergedRow[`${fromTable}.${key}`] = value;
-        }
-
-        // Add right table fields with prefix
-        for (const [key, value] of Object.entries(rightRow)) {
-          mergedRow[`${join.table}.${key}`] = value;
-        }
-
-        joined.push(mergedRow);
-      }
-    }
-  }
-
-  return joined;
-}
-
 function formatFunctionArgs(args: ColumnExpression[]): string {
   return args
     .map((arg) => {
@@ -889,26 +773,3 @@ function executeFunction(
   }
 }
 
-function applyIndexForJoinValue<DataModel extends GenericDataModel>(
-  ctx: GenericQueryCtx<DataModel>,
-  query: any,
-  tableName: string,
-  indexName: string,
-  joinField: string,
-  joinValue: any,
-): any {
-  // Get index information
-  const indexRegistry = getIndexRegistry();
-  const tableIndexes = indexRegistry[tableName];
-  const indexColumns = tableIndexes[indexName];
-
-  // Build a filter that matches the join value on the first index column
-  // (assuming the join field is the first column of the index)
-  if (indexColumns[0] === joinField) {
-    return query.withIndex(indexName, (q: any) => q.eq(joinField, joinValue));
-  }
-
-  // If join field is not the first column, we can't optimize with this index
-  // Fall back to regular filtering
-  return query.filter((q: any) => q.eq(q.field(joinField), joinValue));
-}
