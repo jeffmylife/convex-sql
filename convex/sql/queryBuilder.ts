@@ -163,6 +163,24 @@ function buildIndexFilter(
   };
 }
 
+function hasConditionsNotInIndex(
+  whereClause: WhereClause,
+  indexedFields: Set<string>,
+): boolean {
+  function checkWhere(node: WhereClause): boolean {
+    if (node.type === "COMPARISON") {
+      return !indexedFields.has(node.field!);
+    } else if (node.type === "AND") {
+      return checkWhere(node.left!) || checkWhere(node.right!);
+    } else if (node.type === "OR") {
+      return checkWhere(node.left!) || checkWhere(node.right!);
+    }
+    return false;
+  }
+
+  return checkWhere(whereClause);
+}
+
 function extractComparisonConditions(
   whereClause: WhereClause,
   tableName: string,
@@ -194,6 +212,11 @@ export async function executeSelect<DataModel extends GenericDataModel>(
   ctx: GenericQueryCtx<DataModel>,
   statement: SelectStatement,
 ): Promise<any[]> {
+  // Validate that the table exists in the schema
+  if (!schema.tables || !(statement.from in schema.tables)) {
+    throw new Error(`Table '${statement.from}' does not exist`);
+  }
+
   // Handle JOINs if present
   if (statement.joins && statement.joins.length > 0) {
     return await executeSelectWithJoin(ctx, statement);
@@ -214,6 +237,21 @@ export async function executeSelect<DataModel extends GenericDataModel>(
       statement.fromIndex,
       statement.where,
     );
+
+    // Also apply any WHERE conditions not covered by the index
+    if (statement.where) {
+      const indexRegistry = getIndexRegistry();
+      const indexColumns = indexRegistry[statement.from]?.[statement.fromIndex] || [];
+      const indexedFields = new Set(indexColumns);
+
+      // Check if WHERE has conditions not in the index
+      const hasNonIndexedConditions = hasConditionsNotInIndex(statement.where, indexedFields);
+      if (hasNonIndexedConditions) {
+        query = query.filter((q) =>
+          buildFilterExpression(q, statement.where!, statement.from),
+        );
+      }
+    }
   } else {
     // Apply WHERE clause as filter
     if (statement.where) {
@@ -223,23 +261,31 @@ export async function executeSelect<DataModel extends GenericDataModel>(
     }
   }
 
-  // Apply ORDER BY and execute query
+  // Apply ORDER BY and execute query with error handling for non-existent tables
   let results;
-  if (statement.orderBy && statement.orderBy.length > 0) {
-    const firstOrder = statement.orderBy[0];
-    const orderedQuery = query.order(firstOrder.direction);
+  try {
+    if (statement.orderBy && statement.orderBy.length > 0) {
+      const firstOrder = statement.orderBy[0];
+      const orderedQuery = query.order(firstOrder.direction);
 
-    if (statement.limit) {
-      results = await orderedQuery.take(statement.limit);
+      if (statement.limit) {
+        results = await orderedQuery.take(statement.limit);
+      } else {
+        results = await orderedQuery.collect();
+      }
     } else {
-      results = await orderedQuery.collect();
+      if (statement.limit) {
+        results = await query.take(statement.limit);
+      } else {
+        results = await query.collect();
+      }
     }
-  } else {
-    if (statement.limit) {
-      results = await query.take(statement.limit);
-    } else {
-      results = await query.collect();
+  } catch (error: any) {
+    // Detect Convex's error for non-existent tables
+    if (error.message && error.message.includes("does not exist")) {
+      throw new Error(`Table '${statement.from}' does not exist`);
     }
+    throw error;
   }
 
   // Apply GROUP BY if present
@@ -255,12 +301,19 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
   ctx: GenericQueryCtx<DataModel>,
   statement: SelectStatement,
 ): Promise<any[]> {
+  // Validate all table names in JOINs
+  for (const join of statement.joins!) {
+    if (!schema.tables || !(join.table in schema.tables)) {
+      throw new Error(`Table '${join.table}' does not exist`);
+    }
+  }
+
   const leftTableName = statement.from as TableNamesInDataModel<DataModel>;
 
   // 1. Query the FROM table (apply WHERE filters that apply to this table)
   let leftQuery = ctx.db.query(leftTableName);
 
-  // Apply index or WHERE clauses that filter the left table
+  // Apply index if specified (for performance)
   if (statement.fromIndex) {
     leftQuery = applyIndex(
       ctx,
@@ -269,17 +322,27 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
       statement.fromIndex,
       statement.where,
     );
-  } else {
-    // Apply WHERE clauses that filter the left table
-    if (statement.where) {
-      leftQuery = leftQuery.filter((q) =>
-        buildFilterExpression(q, statement.where!, statement.from),
-      );
-    }
+  }
+
+  // Always apply WHERE filter to ensure correctness
+  // (The index may not filter all conditions correctly in some cases)
+  if (statement.where) {
+    leftQuery = leftQuery.filter((q) =>
+      buildFilterExpression(q, statement.where!, statement.from),
+    );
   }
 
   // For JOINs, collect left table results
-  let leftResults = await leftQuery.collect();
+  let leftResults;
+  try {
+    leftResults = await leftQuery.collect();
+  } catch (error: any) {
+    // Detect Convex's error for non-existent tables
+    if (error.message && error.message.includes("does not exist")) {
+      throw new Error(`Table '${statement.from}' does not exist`);
+    }
+    throw error;
+  }
   console.log(`[SQL] Left table (${statement.from}): ${leftResults.length} rows`);
 
   // 2. For each JOIN, fetch and merge data
@@ -332,7 +395,16 @@ async function performJoin<DataModel extends GenericDataModel>(
   }
 
   // Read right table
-  const rightResults = await rightQuery.collect();
+  let rightResults;
+  try {
+    rightResults = await rightQuery.collect();
+  } catch (error: any) {
+    // Detect Convex's error for non-existent tables
+    if (error.message && error.message.includes("does not exist")) {
+      throw new Error(`Table '${join.table}' does not exist`);
+    }
+    throw error;
+  }
   console.log(`[SQL] Right table (${join.table}): ${rightResults.length} rows`);
 
   // Create index map for O(1) lookup during join

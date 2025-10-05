@@ -4,6 +4,7 @@ import { api } from "./_generated/api";
 import schema from "./schema";
 
 // Include all Convex modules including _generated
+// @ts-ignore - import.meta.glob is a Vite feature
 const modules = import.meta.glob("./**/*.*s");
 
 describe("SQL Query Examples", () => {
@@ -95,6 +96,28 @@ WHERE users.status = 'active'`,
         expect(row).toHaveProperty("name");
         expect(row).toHaveProperty("title");
       }
+
+      // Verify we're actually filtering - should be less than total posts
+      const allPosts = await t.query(api.sqlQueries.runSQL, {
+        sql: "SELECT COUNT(*) FROM posts",
+      });
+      if (allPosts.success) {
+        expect(result.data.length).toBeLessThan(allPosts.data[0]["COUNT(*)"]);
+      }
+    }
+  });
+
+  test("JOIN: Index with non-existent status should return 0 rows", async () => {
+    const result = await t.query(api.sqlQueries.runSQL, {
+      sql: `SELECT users.name, posts.title
+FROM users@by_status
+INNER JOIN posts@by_author ON users._id = posts.authorId
+WHERE users.status = 'NON_EXISTING_STATUS'`,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.length).toBe(0);
     }
   });
 
