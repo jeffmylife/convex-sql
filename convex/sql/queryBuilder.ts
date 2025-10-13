@@ -310,6 +310,15 @@ export async function executeSelect<DataModel extends GenericDataModel>(
     throw error;
   }
 
+  // Apply GROUP BY if present (must be before LIMIT for correct SQL semantics)
+  if (statement.groupBy && statement.groupBy.length > 0) {
+    const grouped = applyGroupBy(results, statement);
+    // Apply ORDER BY to grouped results
+    const ordered = statement.orderBy ? applyOrderBy(grouped, statement.orderBy) : grouped;
+    // Apply LIMIT after grouping and ordering
+    return statement.limit ? ordered.slice(0, statement.limit) : ordered;
+  }
+
   // Apply in-memory ORDER BY if we couldn't use Convex's built-in ordering
   if (!canUseConvexOrdering && statement.orderBy && statement.orderBy.length > 0) {
     results = applyOrderBy(results, statement.orderBy);
@@ -318,11 +327,6 @@ export async function executeSelect<DataModel extends GenericDataModel>(
   // Apply LIMIT if we didn't use Convex ordering (which already applied it)
   if (!canUseConvexOrdering && statement.limit) {
     results = results.slice(0, statement.limit);
-  }
-
-  // Apply GROUP BY if present
-  if (statement.groupBy && statement.groupBy.length > 0) {
-    return applyGroupBy(results, statement);
   }
 
   // Apply column selection
