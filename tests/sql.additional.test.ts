@@ -1,6 +1,6 @@
 import { convexTest } from "convex-test";
 import { expect, test, describe, beforeEach } from "vitest";
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import schema from "../convex/schema";
 
 // Include all Convex modules including _generated
@@ -12,13 +12,13 @@ describe("SQL Engine - Additional Coverage", () => {
 
   beforeEach(async () => {
     t = convexTest(schema, modules);
-    await t.mutation(api.seedData.seedDatabase, {});
+    await t.mutation(internal.seedData.seedDatabase, {});
   });
 
   test("JOIN: Multiple ON equality conditions", async () => {
     // Create a contrived self-join style constraint: users._id = posts.authorId AND users.status = users.status
     // Second condition is tautological but exercises multi-condition path with two fields.
-    const res = await t.query(api.sqlQueries.runSQL, {
+    const res = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT users.name, posts.title
 FROM users
 INNER JOIN posts ON users._id = posts.authorId AND users.status = users.status
@@ -35,10 +35,10 @@ LIMIT 5`,
   });
 
   test("ORDER BY: Asc/Desc on numeric column", async () => {
-    const asc = await t.query(api.sqlQueries.runSQL, {
+    const asc = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT age FROM users ORDER BY age ASC LIMIT 5",
     });
-    const desc = await t.query(api.sqlQueries.runSQL, {
+    const desc = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT age FROM users ORDER BY age DESC LIMIT 5",
     });
     expect(asc.success).toBe(true);
@@ -56,7 +56,7 @@ LIMIT 5`,
   });
 
   test("JOIN: Users.* projection with table-star and column selection", async () => {
-    const res = await t.query(api.sqlQueries.runSQL, {
+    const res = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT users.*, posts.title
 FROM users
 INNER JOIN posts ON users._id = posts.authorId
@@ -77,7 +77,7 @@ LIMIT 3`,
   test("Index: Gracefully handles missing prefix column with fallback", async () => {
     // by_status_and_age requires equality on status before range on age
     // Our implementation gracefully falls back to regular filtering
-    const res = await t.query(api.sqlQueries.runSQL, {
+    const res = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT * FROM users@by_status_and_age WHERE age > 30",
     });
     expect(res.success).toBe(true);
@@ -91,7 +91,7 @@ LIMIT 3`,
   });
 
   test("GROUP BY: Mixing aggregates and plain columns without GROUP BY should error", async () => {
-    const res = await t.query(api.sqlQueries.runSQL, {
+    const res = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT COUNT(*), age FROM users",
     });
     expect(res.success).toBe(false);
@@ -101,7 +101,7 @@ LIMIT 3`,
   });
 
   test("GROUP BY: SELECT * with GROUP BY should error", async () => {
-    const res = await t.query(api.sqlQueries.runSQL, {
+    const res = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT * FROM users GROUP BY status`,
     });
     expect(res.success).toBe(false);
@@ -111,7 +111,7 @@ LIMIT 3`,
   });
 
   test("HAVING: Reference aggregate via alias", async () => {
-    const res = await t.query(api.sqlQueries.runSQL, {
+    const res = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT status, COUNT(*) AS c
 FROM users
 GROUP BY status
@@ -128,7 +128,7 @@ HAVING c > 10`,
   });
 
   test("JOIN: Non-existent table in JOIN errors clearly", async () => {
-    const res = await t.query(api.sqlQueries.runSQL, {
+    const res = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT users.name
 FROM users
 INNER JOIN does_not_exist ON users._id = does_not_exist.userId`,

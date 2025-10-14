@@ -1,6 +1,7 @@
 import { Token } from "./types";
 
 const KEYWORDS = new Set([
+  // Supported keywords
   "SELECT",
   "FROM",
   "WHERE",
@@ -17,6 +18,18 @@ const KEYWORDS = new Set([
   "INNER",
   "JOIN",
   "ON",
+  // Unsupported write operations (for validation)
+  "INSERT",
+  "UPDATE",
+  "DELETE",
+  "DROP",
+  "CREATE",
+  "ALTER",
+  "TRUNCATE",
+  "REPLACE",
+  "MERGE",
+  "GRANT",
+  "REVOKE",
 ]);
 
 export class Lexer {

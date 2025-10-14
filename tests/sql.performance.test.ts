@@ -1,6 +1,6 @@
 import { convexTest } from "convex-test";
 import { expect, test, describe, beforeEach } from "vitest";
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import schema from "../convex/schema";
 
 // Include all Convex modules including _generated
@@ -13,12 +13,12 @@ describe("SQL Performance - Index vs No Index", () => {
   beforeEach(async () => {
     t = convexTest(schema, modules);
     // Seed with the standard dataset (300 users, 800 posts)
-    await t.mutation(api.seedData.seedDatabase, {});
+    await t.mutation(internal.seedData.seedDatabase, {});
   });
 
   test("Performance comparison: Finding rare status without index (table scan)", async () => {
     // WITHOUT INDEX: Uses Convex's filter() method (no index)
-    const withoutIndex = await t.query(api.sqlQueries.runSQL, {
+    const withoutIndex = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT name, email FROM users WHERE status = 'active' LIMIT 10",
     });
 
@@ -32,7 +32,7 @@ describe("SQL Performance - Index vs No Index", () => {
 
   test("Performance comparison: Finding rare status WITH index (efficient)", async () => {
     // WITH INDEX: Uses by_status index for efficient lookup
-    const withIndex = await t.query(api.sqlQueries.runSQL, {
+    const withIndex = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT name, email FROM users@by_status WHERE status = 'active' LIMIT 10",
     });
 
@@ -62,7 +62,7 @@ describe("SQL Performance - Index vs No Index", () => {
     //
     // Performance gain: 1000x fewer document reads!
 
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT COUNT(*) FROM users@by_status WHERE status = 'pending'",
     });
 
@@ -82,7 +82,7 @@ describe("SQL Performance - Index vs No Index", () => {
 
   test("Range query: Finding users by age without index", async () => {
     // WITHOUT INDEX on age field (uses filter())
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT name, age FROM users WHERE age > 60 LIMIT 5",
     });
 
@@ -101,7 +101,7 @@ describe("SQL Performance - Index vs No Index", () => {
     // - Orders by age using the index
     // - Takes first 5
     // - Only reads 5 documents! (with limit optimization)
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT name, age
 FROM users@by_status_and_age
 WHERE status = 'active'
@@ -123,7 +123,7 @@ LIMIT 5`,
     // JOIN with index on join field (posts@by_author)
     // - Index on posts.authorId speeds up the join lookup
     // - Without the index, must scan all 800 posts for each user
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT users.name, COUNT(*) as post_count
 FROM users@by_status
 INNER JOIN posts@by_author ON users._id = posts.authorId

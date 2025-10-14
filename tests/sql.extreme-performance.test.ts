@@ -1,6 +1,6 @@
 import { convexTest } from "convex-test";
 import { expect, test, describe, beforeEach } from "vitest";
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import schema from "../convex/schema";
 
 // Include all Convex modules including _generated
@@ -12,7 +12,7 @@ describe("SQL Performance - Most Dramatic Differences", () => {
 
   beforeEach(async () => {
     t = convexTest(schema, modules);
-    await t.mutation(api.seedData.seedDatabase, {});
+    await t.mutation(internal.seedData.seedDatabase, {});
   });
 
   test("EXTREME #1: Top 10 queries with LIMIT", async () => {
@@ -21,7 +21,7 @@ describe("SQL Performance - Most Dramatic Differences", () => {
     console.log("=".repeat(70));
 
     // WITHOUT INDEX: Read all 300 users, sort in memory, take 10
-    const withoutIndex = await t.query(api.sqlQueries.runSQL, {
+    const withoutIndex = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT name, age FROM users ORDER BY age DESC LIMIT 10",
     });
 
@@ -63,7 +63,7 @@ describe("SQL Performance - Most Dramatic Differences", () => {
     console.log("=".repeat(70));
 
     // Count 'pending' users (likely a small percentage)
-    const countResult = await t.query(api.sqlQueries.runSQL, {
+    const countResult = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT COUNT(*) FROM users WHERE status = 'pending'",
     });
 
@@ -107,7 +107,7 @@ describe("SQL Performance - Most Dramatic Differences", () => {
     console.log("⚡ COMPOUND INDEX: Filter + Order + Limit");
     console.log("=".repeat(70));
 
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT name, age
 FROM users@by_status_and_age
 WHERE status = 'active'

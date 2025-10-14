@@ -13,17 +13,20 @@ import {
   OrderByClause,
 } from "./types";
 import { DatabaseContext, SchemaInfo } from "./database";
+import { QueryLimits, DEFAULT_LIMITS } from "./limits";
 
 /**
  * Execute a SQL SELECT query against a database context
  *
  * @param ctx - Database context providing query and schema access
  * @param sql - SQL SELECT statement string
+ * @param limits - Optional query limits (defaults to DEFAULT_LIMITS)
  * @returns Query results as array of objects
  */
 export async function executeSQL(
   ctx: DatabaseContext,
-  sql: string
+  sql: string,
+  limits: QueryLimits = DEFAULT_LIMITS
 ): Promise<any[]> {
   // Parse SQL
   const lexer = new Lexer(sql);
@@ -31,8 +34,57 @@ export async function executeSQL(
   const parser = new Parser(tokens);
   const statement = parser.parse();
 
+  // Validate query against limits
+  validateQueryLimits(statement, limits);
+
   // Execute
-  return await executeSQLStatement(ctx, statement);
+  return await executeSQLStatement(ctx, statement, limits);
+}
+
+/**
+ * Check if query has only aggregate functions (no GROUP BY)
+ */
+function hasOnlyAggregateFunctions(statement: SelectStatement): boolean {
+  if (statement.groupBy && statement.groupBy.length > 0) {
+    return false;
+  }
+  const hasOnlyFunctions =
+    statement.columns.length > 0 &&
+    statement.columns.every((c) => c.type === "FUNCTION");
+  return hasOnlyFunctions;
+}
+
+/**
+ * Validate query against configured limits
+ */
+function validateQueryLimits(statement: SelectStatement, limits: QueryLimits): void {
+  const isAggregateOnly = hasOnlyAggregateFunctions(statement);
+
+  // Check if LIMIT is required and missing
+  if (limits.requireLimit && !statement.limit && !statement.groupBy && !isAggregateOnly) {
+    // Check if table is exempt
+    if (!limits.exemptTables.includes(statement.from)) {
+      throw new Error(
+        `Query must include a LIMIT clause for table '${statement.from}'. ` +
+        `Maximum allowed LIMIT is ${limits.maxLimit}. ` +
+        `This prevents accidentally reading large tables.`
+      );
+    }
+  }
+
+  // Check if LIMIT exceeds maximum
+  if (statement.limit && statement.limit > limits.maxLimit) {
+    throw new Error(
+      `LIMIT ${statement.limit} exceeds maximum allowed limit of ${limits.maxLimit}. ` +
+      `Reduce your LIMIT or contact administrator to increase limits.`
+    );
+  }
+
+  // Auto-apply maxLimit if no LIMIT specified (and not required)
+  // But DON'T apply to aggregate-only queries (they need to scan all rows)
+  if (!statement.limit && !statement.groupBy && !isAggregateOnly) {
+    statement.limit = limits.maxRows;
+  }
 }
 
 /**
@@ -40,7 +92,8 @@ export async function executeSQL(
  */
 export async function executeSQLStatement(
   ctx: DatabaseContext,
-  statement: SelectStatement
+  statement: SelectStatement,
+  limits: QueryLimits = DEFAULT_LIMITS
 ): Promise<any[]> {
   const schema = ctx.getSchema();
 
@@ -51,7 +104,7 @@ export async function executeSQLStatement(
 
   // Handle JOINs if present
   if (statement.joins && statement.joins.length > 0) {
-    return await executeSelectWithJoin(ctx, statement, schema);
+    return await executeSelectWithJoin(ctx, statement, schema, limits);
   }
 
   // Simple SELECT without JOIN
@@ -105,6 +158,9 @@ export async function executeSQLStatement(
     }
   }
 
+  // Check if this is an aggregate-only query
+  const isAggregateOnly = hasOnlyAggregateFunctions(statement);
+
   // Execute query
   let results;
   try {
@@ -112,7 +168,8 @@ export async function executeSQLStatement(
       const direction = statement.orderBy[0].direction;
       const orderedQuery = query.order(direction);
 
-      if (statement.limit) {
+      // Don't apply LIMIT during scan for aggregate-only queries (they need all rows)
+      if (statement.limit && !isAggregateOnly) {
         results = await orderedQuery.take(statement.limit);
       } else {
         results = await orderedQuery.collect();
@@ -140,12 +197,26 @@ export async function executeSQLStatement(
   }
 
   // Apply LIMIT if we didn't use native ordering (which already applied it)
-  if (!canUseNativeOrdering && statement.limit) {
+  // BUT skip for aggregate-only queries (they need to aggregate all rows first)
+  if (!canUseNativeOrdering && statement.limit && !isAggregateOnly) {
     results = results.slice(0, statement.limit);
   }
 
-  // Apply column selection
-  return projectColumns(results, statement.columns, statement.from);
+  // Apply column selection (which computes aggregates if hasOnlyFunctions)
+  const projected = projectColumns(results, statement.columns, statement.from);
+
+  // Apply LIMIT AFTER aggregates for aggregate-only queries
+  if (isAggregateOnly && statement.limit) {
+    const limited = projected.slice(0, statement.limit);
+    return limited.length > limits.maxRows ? limited.slice(0, limits.maxRows) : limited;
+  }
+
+  // Enforce maximum result size
+  if (projected.length > limits.maxRows) {
+    return projected.slice(0, limits.maxRows);
+  }
+
+  return projected;
 }
 
 /**
@@ -154,7 +225,8 @@ export async function executeSQLStatement(
 async function executeSelectWithJoin(
   ctx: DatabaseContext,
   statement: SelectStatement,
-  schema: SchemaInfo
+  schema: SchemaInfo,
+  limits: QueryLimits
 ): Promise<any[]> {
   // Validate all table names in JOINs
   for (const join of statement.joins!) {
@@ -213,7 +285,10 @@ async function executeSelectWithJoin(
   if (statement.groupBy && statement.groupBy.length > 0) {
     const grouped = applyGroupBy(leftResults, statement);
     const ordered = statement.orderBy ? applyOrderBy(grouped, statement.orderBy) : grouped;
-    return statement.limit ? ordered.slice(0, statement.limit) : ordered;
+    const limited = statement.limit ? ordered.slice(0, statement.limit) : ordered;
+
+    // Enforce maximum result size
+    return limited.length > limits.maxRows ? limited.slice(0, limits.maxRows) : limited;
   }
 
   // 4. Apply column projection
@@ -228,7 +303,10 @@ async function executeSelectWithJoin(
   const ordered = statement.orderBy ? applyOrderBy(projected, statement.orderBy) : projected;
 
   // 6. Apply LIMIT
-  return statement.limit ? ordered.slice(0, statement.limit) : ordered;
+  const limited = statement.limit ? ordered.slice(0, statement.limit) : ordered;
+
+  // 7. Enforce maximum result size
+  return limited.length > limits.maxRows ? limited.slice(0, limits.maxRows) : limited;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { convexTest } from "convex-test";
 import { expect, test, describe, beforeEach } from "vitest";
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import schema from "../convex/schema";
 
 // Include all Convex modules including _generated
@@ -14,11 +14,11 @@ describe("SQL Query Examples", () => {
     t = convexTest(schema, modules);
 
     // Seed test data
-    await t.mutation(api.seedData.seedDatabase, {});
+    await t.mutation(internal.seedData.seedDatabase, {});
   });
 
   test("Basic: Select all users", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT * FROM users",
     });
 
@@ -34,7 +34,7 @@ describe("SQL Query Examples", () => {
   });
 
   test("WHERE: Filter by age", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT name, email\nFROM users\nWHERE age > 18",
     });
 
@@ -50,7 +50,7 @@ describe("SQL Query Examples", () => {
   });
 
   test("Index: Query with index", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT * FROM users@by_status WHERE status = 'active'",
     });
 
@@ -65,7 +65,7 @@ describe("SQL Query Examples", () => {
   });
 
   test("JOIN: Users & posts", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT users.name, posts.title
 FROM users
 INNER JOIN posts ON users._id = posts.authorId`,
@@ -82,7 +82,7 @@ INNER JOIN posts ON users._id = posts.authorId`,
   });
 
   test("JOIN: With WHERE filter", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT users.name, posts.title
 FROM users@by_status
 INNER JOIN posts@by_author ON users._id = posts.authorId
@@ -98,7 +98,7 @@ WHERE users.status = 'active'`,
       }
 
       // Verify we're actually filtering - should be less than total posts
-      const allPosts = await t.query(api.sqlQueries.runSQL, {
+      const allPosts = await t.query(internal.sqlQueries.runSQLTest, {
         sql: "SELECT COUNT(*) FROM posts",
       });
       if (allPosts.success) {
@@ -108,7 +108,7 @@ WHERE users.status = 'active'`,
   });
 
   test("JOIN: Index with non-existent status should return 0 rows", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT users.name, posts.title
 FROM users@by_status
 INNER JOIN posts@by_author ON users._id = posts.authorId
@@ -122,7 +122,7 @@ WHERE users.status = 'NON_EXISTING_STATUS'`,
   });
 
   test("Aggregate: COUNT", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT COUNT(*) FROM users",
     });
 
@@ -135,7 +135,7 @@ WHERE users.status = 'NON_EXISTING_STATUS'`,
   });
 
   test("GROUP BY: Count by status", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT status, COUNT(*) AS user_count
 FROM users
 GROUP BY status`,
@@ -153,7 +153,7 @@ GROUP BY status`,
   });
 
   test("GROUP BY: AVG, MIN, MAX", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT status, AVG(age) AS avg_age, MIN(age) AS min_age, MAX(age) AS max_age
 FROM users
 GROUP BY status`,
@@ -175,7 +175,7 @@ GROUP BY status`,
   });
 
   test("HAVING: Filter groups", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: `SELECT status, COUNT(*) AS count
 FROM users
 GROUP BY status
@@ -194,7 +194,7 @@ HAVING COUNT(*) > 1`,
   });
 
   test("ORDER BY: Sort by name ascending", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT name FROM users ORDER BY name ASC LIMIT 5",
     });
 
@@ -209,7 +209,7 @@ HAVING COUNT(*) > 1`,
   });
 
   test("ORDER BY: Sort by age descending with index", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT name, age FROM users@by_status_and_age WHERE status = 'active' ORDER BY age DESC LIMIT 5",
     });
 
@@ -224,7 +224,7 @@ HAVING COUNT(*) > 1`,
   });
 
   test("Error handling: Invalid SQL", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "INVALID SQL QUERY",
     });
 
@@ -236,7 +236,7 @@ HAVING COUNT(*) > 1`,
   });
 
   test("Error handling: Non-existent table", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT * FROM nonexistent_table",
     });
 

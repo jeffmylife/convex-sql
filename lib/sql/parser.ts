@@ -17,6 +17,37 @@ export class Parser {
   }
 
   parse(): SelectStatement {
+    // Validate that the query is a SELECT statement (read-only)
+    if (this.tokens.length === 0) {
+      throw new Error("Empty SQL query");
+    }
+
+    const firstToken = this.tokens[0];
+    if (firstToken.type !== "KEYWORD" || !firstToken.value || firstToken.value.trim() === "") {
+      throw new Error(firstToken.value ? `Expected SQL command, got: ${firstToken.value}` : "Empty SQL query");
+    }
+
+    const command = firstToken.value.toUpperCase();
+
+    // Only SELECT is supported - reject all write operations
+    const unsupportedCommands = [
+      "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
+      "TRUNCATE", "REPLACE", "MERGE", "GRANT", "REVOKE"
+    ];
+
+    if (unsupportedCommands.includes(command)) {
+      throw new Error(
+        `Write operations are not supported. '${command}' is a write operation. ` +
+        `Only SELECT queries are allowed for safety.`
+      );
+    }
+
+    if (command !== "SELECT") {
+      throw new Error(
+        `Unsupported SQL command: '${command}'. Only SELECT queries are supported.`
+      );
+    }
+
     return this.parseSelect();
   }
 

@@ -1,4 +1,4 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { faker } from "@faker-js/faker";
 
@@ -6,8 +6,9 @@ const STATUSES = ["active", "inactive", "pending"];
 
 /**
  * Seed the database with sample users and posts using Faker
+ * INTERNAL ONLY - not exposed to public API for security
  */
-export const seedDatabase = mutation({
+export const seedDatabase = internalMutation({
   args: {},
   returns: v.null(),
   handler: async (ctx) => {
@@ -60,8 +61,9 @@ export const seedDatabase = mutation({
 
 /**
  * Clear all data from users and posts tables
+ * INTERNAL ONLY - not exposed to public API for security
  */
-export const clearDatabase = mutation({
+export const clearDatabase = internalMutation({
   args: {},
   returns: v.null(),
   handler: async (ctx) => {

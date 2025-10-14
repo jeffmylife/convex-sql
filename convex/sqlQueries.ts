@@ -1,15 +1,15 @@
-import { query } from "./_generated/server";
+import { query, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
-import { executeSQL } from "./sql";
+import { executeSQL, PERMISSIVE_LIMITS } from "./sql";
 
 /**
- * Example: Get all users
+ * Example: Get all users (with LIMIT for safety)
  */
 export const getAllUsers = query({
   args: {},
   returns: v.any(),
   handler: async (ctx) => {
-    return await executeSQL(ctx, "SELECT * FROM users");
+    return await executeSQL(ctx, "SELECT * FROM users LIMIT 100");
   },
 });
 
@@ -22,7 +22,7 @@ export const getUsersByStatus = query({
   handler: async (ctx, args) => {
     return await executeSQL(
       ctx,
-      `SELECT name, email FROM users WHERE status = '${args.status}'`
+      `SELECT name, email FROM users WHERE status = '${args.status}' LIMIT 100`
     );
   },
 });
@@ -36,7 +36,7 @@ export const getUsersOlderThan = query({
   handler: async (ctx, args) => {
     return await executeSQL(
       ctx,
-      `SELECT * FROM users WHERE age > ${args.age} ORDER BY age DESC`
+      `SELECT * FROM users WHERE age > ${args.age} ORDER BY age DESC LIMIT 100`
     );
   },
 });
@@ -61,19 +61,19 @@ export const getActiveAdults = query({
   handler: async (ctx) => {
     return await executeSQL(
       ctx,
-      "SELECT name, email FROM users WHERE status = 'active' AND age >= 18"
+      "SELECT name, email FROM users WHERE status = 'active' AND age >= 18 LIMIT 100"
     );
   },
 });
 
 /**
- * Example: Get all posts
+ * Example: Get all posts (with LIMIT for safety)
  */
 export const getAllPosts = query({
   args: {},
   returns: v.any(),
   handler: async (ctx) => {
-    return await executeSQL(ctx, "SELECT * FROM posts");
+    return await executeSQL(ctx, "SELECT * FROM posts LIMIT 100");
   },
 });
 
@@ -86,13 +86,18 @@ export const getPublishedPosts = query({
   handler: async (ctx) => {
     return await executeSQL(
       ctx,
-      "SELECT title, content FROM posts WHERE published = true"
+      "SELECT title, content FROM posts WHERE published = true LIMIT 100"
     );
   },
 });
 
 /**
  * Generic SQL query executor - use this to run any SQL query
+ * Uses DEFAULT_LIMITS for production safety
+ *
+ * IMPORTANT: All queries must include a LIMIT clause
+ * Maximum LIMIT value: 1000
+ * Maximum rows returned: 1000
  */
 export const runSQL = query({
   args: { sql: v.string() },
@@ -102,7 +107,34 @@ export const runSQL = query({
   ),
   handler: async (ctx, args) => {
     try {
+      // Uses DEFAULT_LIMITS for production safety
       const data = await executeSQL(ctx, args.sql);
+      return { success: true as const, data };
+    } catch (error) {
+      return {
+        success: false as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  },
+});
+
+/**
+ * Internal SQL query executor for testing
+ * Uses PERMISSIVE_LIMITS - NOT for production use
+ *
+ * This is used by tests to avoid strict LIMIT requirements
+ */
+export const runSQLTest = internalQuery({
+  args: { sql: v.string() },
+  returns: v.union(
+    v.object({ success: v.literal(true), data: v.any() }),
+    v.object({ success: v.literal(false), error: v.string() })
+  ),
+  handler: async (ctx, args) => {
+    try {
+      // Uses PERMISSIVE_LIMITS for testing
+      const data = await executeSQL(ctx, args.sql, PERMISSIVE_LIMITS);
       return { success: true as const, data };
     } catch (error) {
       return {

@@ -1,6 +1,6 @@
 import { convexTest } from "convex-test";
 import { expect, test, describe, beforeEach } from "vitest";
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import schema from "../convex/schema";
 
 // Include all Convex modules including _generated
@@ -12,11 +12,11 @@ describe("Bug: GROUP BY should respect LIMIT", () => {
 
   beforeEach(async () => {
     t = convexTest(schema, modules);
-    await t.mutation(api.seedData.seedDatabase, {});
+    await t.mutation(internal.seedData.seedDatabase, {});
   });
 
   test("GROUP BY with LIMIT should return limited groups", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT status, COUNT(*) as count FROM users GROUP BY status LIMIT 2",
     });
 
@@ -31,7 +31,7 @@ describe("Bug: GROUP BY should respect LIMIT", () => {
   });
 
   test("GROUP BY without LIMIT should return all groups", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT status, COUNT(*) as count FROM users GROUP BY status",
     });
 
@@ -46,7 +46,7 @@ describe("Bug: GROUP BY should respect LIMIT", () => {
   });
 
   test("Simple query with LIMIT works correctly", async () => {
-    const result = await t.query(api.sqlQueries.runSQL, {
+    const result = await t.query(internal.sqlQueries.runSQLTest, {
       sql: "SELECT name FROM users LIMIT 5",
     });
 

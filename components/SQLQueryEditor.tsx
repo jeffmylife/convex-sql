@@ -33,28 +33,30 @@ import { Parser } from "@/lib/sql/parser";
 const EXAMPLE_QUERIES = [
   {
     label: "Basic: Select all users",
-    query: "SELECT * FROM users",
+    query: "SELECT * FROM users LIMIT 100",
   },
   {
     label: "WHERE: Filter by age",
-    query: "SELECT name, email\nFROM users\nWHERE age > 18",
+    query: "SELECT name, email\nFROM users\nWHERE age > 18\nLIMIT 100",
   },
   {
     label: "Index: Query with index",
-    query: "SELECT * FROM users@by_status WHERE status = 'active'",
+    query: "SELECT * FROM users@by_status WHERE status = 'active' LIMIT 100",
   },
   {
     label: "JOIN: Users & posts",
     query: `SELECT users.name, posts.title
 FROM users
-INNER JOIN posts ON users._id = posts.authorId`,
+INNER JOIN posts ON users._id = posts.authorId
+LIMIT 100`,
   },
   {
     label: "JOIN: With WHERE filter",
     query: `SELECT users.name, posts.title
 FROM users@by_status
 INNER JOIN posts@by_author ON users._id = posts.authorId
-WHERE users.status = 'active'`,
+WHERE users.status = 'active'
+LIMIT 100`,
   },
   {
     label: "Aggregate: COUNT",
