@@ -1,8 +1,6 @@
-import { GenericQueryCtx } from "convex/server";
-import { GenericDataModel } from "convex/server";
-import { Lexer } from "../../lib/sql/lexer";
-import { Parser } from "../../lib/sql/parser";
-import { executeSelect } from "./queryBuilder";
+import { GenericQueryCtx, GenericDataModel } from "convex/server";
+import { executeSQL as executeSQLEngine } from "../../lib/sql/engine";
+import { ConvexDatabaseContext } from "./adapter";
 
 /**
  * Execute a SQL SELECT query against Convex database
@@ -21,14 +19,9 @@ export async function executeSQL<DataModel extends GenericDataModel>(
   ctx: GenericQueryCtx<DataModel>,
   sql: string
 ): Promise<any[]> {
-  // Tokenize
-  const lexer = new Lexer(sql);
-  const tokens = lexer.tokenize();
+  // Create Convex database adapter
+  const dbContext = new ConvexDatabaseContext(ctx);
 
-  // Parse
-  const parser = new Parser(tokens);
-  const ast = parser.parse();
-
-  // Execute
-  return await executeSelect(ctx, ast);
+  // Execute using pure SQL engine
+  return await executeSQLEngine(dbContext, sql);
 }

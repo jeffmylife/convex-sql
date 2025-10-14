@@ -1,11 +1,11 @@
 import { convexTest } from "convex-test";
 import { expect, test, describe, beforeEach } from "vitest";
-import { api } from "./_generated/api";
-import schema from "./schema";
+import { api } from "../convex/_generated/api";
+import schema from "../convex/schema";
 
 // Include all Convex modules including _generated
 // @ts-ignore - import.meta.glob is a Vite feature
-const modules = import.meta.glob("./**/*.*s");
+const modules = import.meta.glob("../convex/**/*.*s");
 
 describe("SQL Performance - Most Dramatic Differences", () => {
   let t: ReturnType<typeof convexTest>;

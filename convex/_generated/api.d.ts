@@ -14,8 +14,8 @@ import type {
   FunctionReference,
 } from "convex/server";
 import type * as seedData from "../seedData.js";
+import type * as sql_adapter from "../sql/adapter.js";
 import type * as sql_index from "../sql/index.js";
-import type * as sql_queryBuilder from "../sql/queryBuilder.js";
 import type * as sqlQueries from "../sqlQueries.js";
 
 /**
@@ -28,8 +28,8 @@ import type * as sqlQueries from "../sqlQueries.js";
  */
 declare const fullApi: ApiFromModules<{
   seedData: typeof seedData;
+  "sql/adapter": typeof sql_adapter;
   "sql/index": typeof sql_index;
-  "sql/queryBuilder": typeof sql_queryBuilder;
   sqlQueries: typeof sqlQueries;
 }>;
 export declare const api: FilterApi<

@@ -1,4 +1,9 @@
-import { GenericQueryCtx } from "convex/server";
+/**
+ * Pure SQL execution engine - decoupled from any specific database system
+ */
+
+import { Lexer } from "./lexer";
+import { Parser } from "./parser";
 import {
   SelectStatement,
   WhereClause,
@@ -6,254 +11,70 @@ import {
   ColumnExpression,
   GroupByClause,
   OrderByClause,
-} from "../../lib/sql/types";
-import { GenericDataModel, TableNamesInDataModel } from "convex/server";
-import schema from "../schema.js";
+} from "./types";
+import { DatabaseContext, SchemaInfo } from "./database";
 
-// Cache for extracted index information
-let indexCache: Record<string, Record<string, string[]>> | null = null;
-
-function getIndexRegistry(): Record<string, Record<string, string[]>> {
-  if (indexCache !== null) {
-    return indexCache;
-  }
-
-  indexCache = {};
-
-  // Extract index information from the schema at runtime
-  if (!schema || !schema.tables) {
-    throw new Error("Schema object not found or does not have tables property");
-  }
-
-  for (const [tableName, tableDefinition] of Object.entries(schema.tables)) {
-    const tableIndexes: Record<string, string[]> = {};
-
-    // Use the experimental indexes() method to get index information
-    if (typeof (tableDefinition as any)[" indexes"] !== "function") {
-      throw new Error(`Table '${tableName}' does not have indexes() method`);
-    }
-
-    const indexes = (tableDefinition as any)[" indexes"]();
-    for (const indexInfo of indexes) {
-      // Skip system indexes (they start with underscore)
-      if (!indexInfo.indexDescriptor.startsWith("_")) {
-        // Remove the tiebreaker field (_creationTime) from the end
-        const fields = indexInfo.fields.slice(0, -1);
-        tableIndexes[indexInfo.indexDescriptor] = fields;
-      }
-    }
-
-    if (Object.keys(tableIndexes).length > 0) {
-      indexCache[tableName] = tableIndexes;
-    }
-  }
-
-  return indexCache;
-}
-
-function applyIndex<DataModel extends GenericDataModel>(
-  ctx: GenericQueryCtx<DataModel>,
-  query: any,
-  tableName: string,
-  indexName: string,
-  whereClause?: WhereClause,
-): any {
-  // Get actual index information from the schema
-  const indexRegistry = getIndexRegistry();
-  const tableIndexes = indexRegistry[tableName];
-
-  if (!tableIndexes) {
-    throw new Error(`Table '${tableName}' not found in schema`);
-  }
-
-  const indexColumns = tableIndexes[indexName];
-  if (!indexColumns) {
-    throw new Error(
-      `Index '${indexName}' not found for table '${tableName}'. ` +
-        `Available indexes: ${Object.keys(tableIndexes).join(", ")}`,
-    );
-  }
-
-  // Build the index filter based on WHERE conditions
-  const indexFilter = buildIndexFilter(whereClause, indexColumns, tableName);
-
-  // Apply the index
-  return query.withIndex(indexName, indexFilter);
-}
-
-function buildIndexFilter(
-  whereClause: WhereClause | undefined,
-  indexColumns: string[],
-  tableName: string,
-): (q: any) => boolean {
-  return (q: any) => {
-    if (!whereClause) {
-      throw new Error(
-        `Index '${indexColumns.join("_and_")}' requires WHERE conditions on columns: ${indexColumns.join(", ")}`,
-      );
-    }
-
-    const conditions = extractComparisonConditions(whereClause, tableName);
-
-    // For multi-column indexes, we need:
-    // - Equality conditions for all columns except possibly the last
-    // - Any condition (including range) for the last column
-    let filterChain = q;
-
-    for (let i = 0; i < indexColumns.length; i++) {
-      const column = indexColumns[i];
-      const isLastColumn = i === indexColumns.length - 1;
-      const condition = conditions.find((c) => c.field === column);
-
-      if (!condition) {
-        if (isLastColumn) {
-          // Last column doesn't require a condition, but we'll skip it
-          continue;
-        } else {
-          throw new Error(
-            `Index '${indexColumns.join("_and_")}' requires WHERE condition on column '${column}' (prefix column)`,
-          );
-        }
-      }
-
-      // Apply the appropriate filter based on the operator
-      switch (condition.operator) {
-        case "=":
-          filterChain = filterChain.eq(column, condition.value);
-          break;
-        case ">":
-          if (!isLastColumn) {
-            throw new Error(
-              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column '${column}'`,
-            );
-          }
-          filterChain = filterChain.gt(column, condition.value);
-          break;
-        case "<":
-          if (!isLastColumn) {
-            throw new Error(
-              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column '${column}'`,
-            );
-          }
-          filterChain = filterChain.lt(column, condition.value);
-          break;
-        case ">=":
-          if (!isLastColumn) {
-            throw new Error(
-              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column '${column}'`,
-            );
-          }
-          filterChain = filterChain.gte(column, condition.value);
-          break;
-        case "<=":
-          if (!isLastColumn) {
-            throw new Error(
-              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column '${column}'`,
-            );
-          }
-          filterChain = filterChain.lte(column, condition.value);
-          break;
-        default:
-          throw new Error(
-            `Index '${indexColumns.join("_and_")}' does not support operator '${condition.operator}' on column '${column}'`,
-          );
-      }
-    }
-
-    return filterChain;
-  };
-}
-
-function hasConditionsNotInIndex(
-  whereClause: WhereClause,
-  indexedFields: Set<string>,
-): boolean {
-  function checkWhere(node: WhereClause): boolean {
-    if (node.type === "COMPARISON") {
-      return !indexedFields.has(node.field!);
-    } else if (node.type === "AND") {
-      return checkWhere(node.left!) || checkWhere(node.right!);
-    } else if (node.type === "OR") {
-      return checkWhere(node.left!) || checkWhere(node.right!);
-    }
-    return false;
-  }
-
-  return checkWhere(whereClause);
-}
-
-function extractComparisonConditions(
-  whereClause: WhereClause,
-  tableName: string,
-): Array<{ field: string; operator: string; value: any }> {
-  const conditions: Array<{ field: string; operator: string; value: any }> = [];
-
-  function traverseWhere(node: WhereClause): void {
-    if (node.type === "COMPARISON") {
-      // Only include conditions for the specified table (or no table specified)
-      if (!node.table || node.table === tableName) {
-        conditions.push({
-          field: node.field!,
-          operator: node.operator!,
-          value: node.value,
-        });
-      }
-    } else if (node.type === "AND") {
-      traverseWhere(node.left!);
-      traverseWhere(node.right!);
-    }
-    // For OR conditions, we don't handle them for indexes (too complex)
-  }
-
-  traverseWhere(whereClause);
-  return conditions;
-}
-
-export async function executeSelect<DataModel extends GenericDataModel>(
-  ctx: GenericQueryCtx<DataModel>,
-  statement: SelectStatement,
+/**
+ * Execute a SQL SELECT query against a database context
+ *
+ * @param ctx - Database context providing query and schema access
+ * @param sql - SQL SELECT statement string
+ * @returns Query results as array of objects
+ */
+export async function executeSQL(
+  ctx: DatabaseContext,
+  sql: string
 ): Promise<any[]> {
-  // Validate that the table exists in the schema
+  // Parse SQL
+  const lexer = new Lexer(sql);
+  const tokens = lexer.tokenize();
+  const parser = new Parser(tokens);
+  const statement = parser.parse();
+
+  // Execute
+  return await executeSQLStatement(ctx, statement);
+}
+
+/**
+ * Execute a parsed SQL statement
+ */
+export async function executeSQLStatement(
+  ctx: DatabaseContext,
+  statement: SelectStatement
+): Promise<any[]> {
+  const schema = ctx.getSchema();
+
+  // Validate table exists
   if (!schema.tables || !(statement.from in schema.tables)) {
     throw new Error(`Table '${statement.from}' does not exist`);
   }
 
   // Handle JOINs if present
   if (statement.joins && statement.joins.length > 0) {
-    return await executeSelectWithJoin(ctx, statement);
+    return await executeSelectWithJoin(ctx, statement, schema);
   }
 
-  // Simple SELECT without JOIN (original logic)
-  const tableName = statement.from as TableNamesInDataModel<DataModel>;
-
-  // Start with a table scan or indexed query
-  let query = ctx.db.query(tableName);
+  // Simple SELECT without JOIN
+  let query = ctx.query(statement.from);
 
   // Apply index if specified
   if (statement.fromIndex) {
     query = applyIndex(
-      ctx,
       query,
       statement.from,
       statement.fromIndex,
       statement.where,
+      schema
     );
 
     // Also apply any WHERE conditions not covered by the index
     if (statement.where) {
-      const indexRegistry = getIndexRegistry();
-      const indexColumns =
-        indexRegistry[statement.from]?.[statement.fromIndex] || [];
+      const indexColumns = schema.tables[statement.from]?.indexes[statement.fromIndex] || [];
       const indexedFields = new Set(indexColumns);
 
-      // Check if WHERE has conditions not in the index
-      const hasNonIndexedConditions = hasConditionsNotInIndex(
-        statement.where,
-        indexedFields,
-      );
-      if (hasNonIndexedConditions) {
+      if (hasConditionsNotInIndex(statement.where, indexedFields)) {
         query = query.filter((q) =>
-          buildFilterExpression(q, statement.where!, statement.from),
+          buildFilterExpression(q, statement.where!, statement.from)
         );
       }
     }
@@ -261,35 +82,33 @@ export async function executeSelect<DataModel extends GenericDataModel>(
     // Apply WHERE clause as filter
     if (statement.where) {
       query = query.filter((q) =>
-        buildFilterExpression(q, statement.where!, statement.from),
+        buildFilterExpression(q, statement.where!, statement.from)
       );
     }
   }
 
-  // Determine if we can use Convex's built-in ordering
-  let canUseConvexOrdering = false;
+  // Determine if we can use database's built-in ordering
+  let canUseNativeOrdering = false;
   if (statement.orderBy && statement.orderBy.length > 0) {
     const firstOrder = statement.orderBy[0];
 
-    // Can use Convex ordering if:
-    // 1. Ordering by _creationTime (default Convex ordering)
+    // Can use native ordering if:
+    // 1. Ordering by _creationTime (common default)
     // 2. Using an index and ordering by the first field of that index
     if (firstOrder.field === "_creationTime") {
-      canUseConvexOrdering = true;
+      canUseNativeOrdering = true;
     } else if (statement.fromIndex) {
-      const indexRegistry = getIndexRegistry();
-      const indexColumns = indexRegistry[statement.from]?.[statement.fromIndex] || [];
-      // Can only use Convex ordering if ORDER BY field is the first (or only) index field
+      const indexColumns = schema.tables[statement.from]?.indexes[statement.fromIndex] || [];
       if (indexColumns.length > 0 && indexColumns[0] === firstOrder.field) {
-        canUseConvexOrdering = true;
+        canUseNativeOrdering = true;
       }
     }
   }
 
-  // Execute query with error handling for non-existent tables
+  // Execute query
   let results;
   try {
-    if (canUseConvexOrdering && statement.orderBy && statement.orderBy.length > 0) {
+    if (canUseNativeOrdering && statement.orderBy && statement.orderBy.length > 0) {
       const direction = statement.orderBy[0].direction;
       const orderedQuery = query.order(direction);
 
@@ -299,11 +118,9 @@ export async function executeSelect<DataModel extends GenericDataModel>(
         results = await orderedQuery.collect();
       }
     } else {
-      // Collect all results, we'll sort in-memory if needed
       results = await query.collect();
     }
   } catch (error: any) {
-    // Detect Convex's error for non-existent tables
     if (error.message && error.message.includes("does not exist")) {
       throw new Error(`Table '${statement.from}' does not exist`);
     }
@@ -313,19 +130,17 @@ export async function executeSelect<DataModel extends GenericDataModel>(
   // Apply GROUP BY if present (must be before LIMIT for correct SQL semantics)
   if (statement.groupBy && statement.groupBy.length > 0) {
     const grouped = applyGroupBy(results, statement);
-    // Apply ORDER BY to grouped results
     const ordered = statement.orderBy ? applyOrderBy(grouped, statement.orderBy) : grouped;
-    // Apply LIMIT after grouping and ordering
     return statement.limit ? ordered.slice(0, statement.limit) : ordered;
   }
 
-  // Apply in-memory ORDER BY if we couldn't use Convex's built-in ordering
-  if (!canUseConvexOrdering && statement.orderBy && statement.orderBy.length > 0) {
+  // Apply in-memory ORDER BY if we couldn't use native ordering
+  if (!canUseNativeOrdering && statement.orderBy && statement.orderBy.length > 0) {
     results = applyOrderBy(results, statement.orderBy);
   }
 
-  // Apply LIMIT if we didn't use Convex ordering (which already applied it)
-  if (!canUseConvexOrdering && statement.limit) {
+  // Apply LIMIT if we didn't use native ordering (which already applied it)
+  if (!canUseNativeOrdering && statement.limit) {
     results = results.slice(0, statement.limit);
   }
 
@@ -333,9 +148,13 @@ export async function executeSelect<DataModel extends GenericDataModel>(
   return projectColumns(results, statement.columns, statement.from);
 }
 
-async function executeSelectWithJoin<DataModel extends GenericDataModel>(
-  ctx: GenericQueryCtx<DataModel>,
+/**
+ * Execute SELECT with JOINs
+ */
+async function executeSelectWithJoin(
+  ctx: DatabaseContext,
   statement: SelectStatement,
+  schema: SchemaInfo
 ): Promise<any[]> {
   // Validate all table names in JOINs
   for (const join of statement.joins!) {
@@ -344,44 +163,39 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
     }
   }
 
-  const leftTableName = statement.from as TableNamesInDataModel<DataModel>;
+  // 1. Query the FROM table
+  let leftQuery = ctx.query(statement.from);
 
-  // 1. Query the FROM table (apply WHERE filters that apply to this table)
-  let leftQuery = ctx.db.query(leftTableName);
-
-  // Apply index if specified (for performance)
+  // Apply index if specified
   if (statement.fromIndex) {
     leftQuery = applyIndex(
-      ctx,
       leftQuery,
       statement.from,
       statement.fromIndex,
       statement.where,
+      schema
     );
   }
 
   // Always apply WHERE filter to ensure correctness
-  // (The index may not filter all conditions correctly in some cases)
   if (statement.where) {
     leftQuery = leftQuery.filter((q) =>
-      buildFilterExpression(q, statement.where!, statement.from),
+      buildFilterExpression(q, statement.where!, statement.from)
     );
   }
 
-  // For JOINs, collect left table results
+  // Collect left table results
   let leftResults;
   try {
     leftResults = await leftQuery.collect();
   } catch (error: any) {
-    // Detect Convex's error for non-existent tables
     if (error.message && error.message.includes("does not exist")) {
       throw new Error(`Table '${statement.from}' does not exist`);
     }
     throw error;
   }
-  console.log(
-    `[SQL] Left table (${statement.from}): ${leftResults.length} rows`,
-  );
+
+  console.log(`[SQL] Left table (${statement.from}): ${leftResults.length} rows`);
 
   // 2. For each JOIN, fetch and merge data
   for (const join of statement.joins!) {
@@ -391,17 +205,14 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
       join,
       statement.from,
       statement.where,
+      schema
     );
   }
 
   // 3. Apply GROUP BY if present
   if (statement.groupBy && statement.groupBy.length > 0) {
     const grouped = applyGroupBy(leftResults, statement);
-    // Apply ORDER BY to grouped results
-    const ordered = statement.orderBy
-      ? applyOrderBy(grouped, statement.orderBy)
-      : grouped;
-    // Apply LIMIT after grouping and ordering
+    const ordered = statement.orderBy ? applyOrderBy(grouped, statement.orderBy) : grouped;
     return statement.limit ? ordered.slice(0, statement.limit) : ordered;
   }
 
@@ -410,49 +221,48 @@ async function executeSelectWithJoin<DataModel extends GenericDataModel>(
     leftResults,
     statement.columns,
     statement.from,
-    statement.joins,
+    statement.joins
   );
 
-  // 5. Apply ORDER BY (correct SQL semantics: ORDER BY happens before LIMIT)
-  const ordered = statement.orderBy
-    ? applyOrderBy(projected, statement.orderBy)
-    : projected;
+  // 5. Apply ORDER BY
+  const ordered = statement.orderBy ? applyOrderBy(projected, statement.orderBy) : projected;
 
-  // 6. Apply LIMIT to final result
+  // 6. Apply LIMIT
   return statement.limit ? ordered.slice(0, statement.limit) : ordered;
 }
 
-async function performJoin<DataModel extends GenericDataModel>(
-  ctx: GenericQueryCtx<DataModel>,
+/**
+ * Perform JOIN operation in memory
+ */
+async function performJoin(
+  ctx: DatabaseContext,
   leftResults: any[],
   join: JoinClause,
   fromTable: string,
-  globalWhereClause?: WhereClause,
+  globalWhereClause: WhereClause | undefined,
+  schema: SchemaInfo
 ): Promise<any[]> {
-  const rightTableName = join.table as TableNamesInDataModel<DataModel>;
+  let rightQuery = ctx.query(join.table);
 
-  // Simple SQL semantics: Read the right table
-  let rightQuery = ctx.db.query(rightTableName);
-
-  // Apply index hint on the right table if provided and usable
+  // Apply index hint on the right table if provided
   if (join.index) {
     try {
       rightQuery = applyIndex(
-        ctx,
         rightQuery,
         join.table,
         join.index,
         globalWhereClause,
+        schema
       );
     } catch (_e) {
-      // If index application fails (e.g., missing prefix), fall back silently
+      // If index application fails, fall back silently
     }
   }
 
   // Apply any WHERE conditions that apply to this joined table
   if (globalWhereClause) {
     rightQuery = rightQuery.filter((q) =>
-      buildFilterExpression(q, globalWhereClause, join.table),
+      buildFilterExpression(q, globalWhereClause, join.table)
     );
   }
 
@@ -461,15 +271,15 @@ async function performJoin<DataModel extends GenericDataModel>(
   try {
     rightResults = await rightQuery.collect();
   } catch (error: any) {
-    // Detect Convex's error for non-existent tables
     if (error.message && error.message.includes("does not exist")) {
       throw new Error(`Table '${join.table}' does not exist`);
     }
     throw error;
   }
+
   console.log(`[SQL] Right table (${join.table}): ${rightResults.length} rows`);
 
-  // Build lookup maps for each equality to speed up multi-condition joins
+  // Build lookup maps for join conditions
   const onConditions = Array.isArray(join.on) ? join.on : [join.on];
 
   // For single-condition fast path
@@ -493,15 +303,13 @@ async function performJoin<DataModel extends GenericDataModel>(
     leftRow: any,
     rightRow: any,
     table: string,
-    field: string,
+    field: string
   ): any {
     if (table === join.table) {
       return rightRow[field];
     }
-    // Value should come from the accumulated left row
     const prefixedKey = `${table}.${field}`;
     if (prefixedKey in leftRow) return leftRow[prefixedKey];
-    // For the root FROM table, left rows may be unprefixed initially
     if (table === fromTable && field in leftRow) return leftRow[field];
     return undefined;
   }
@@ -520,18 +328,8 @@ async function performJoin<DataModel extends GenericDataModel>(
       // Verify all ON conditions
       let matches = true;
       for (const cond of onConditions) {
-        const leftVal = getValue(
-          leftRow,
-          rightRow,
-          cond.leftTable,
-          cond.leftField,
-        );
-        const rightVal = getValue(
-          leftRow,
-          rightRow,
-          cond.rightTable,
-          cond.rightField,
-        );
+        const leftVal = getValue(leftRow, rightRow, cond.leftTable, cond.leftField);
+        const rightVal = getValue(leftRow, rightRow, cond.rightTable, cond.rightField);
         if (leftVal !== rightVal) {
           matches = false;
           break;
@@ -539,12 +337,12 @@ async function performJoin<DataModel extends GenericDataModel>(
       }
       if (!matches) continue;
 
-      // Merge rows with table prefixes, preserving already-prefixed keys on left
+      // Merge rows with table prefixes
       const mergedRow: any = {};
 
       for (const [key, value] of Object.entries(leftRow)) {
         if (key.includes(".")) {
-          mergedRow[key] = value; // already prefixed from prior join
+          mergedRow[key] = value;
         } else {
           mergedRow[`${fromTable}.${key}`] = value;
         }
@@ -561,6 +359,168 @@ async function performJoin<DataModel extends GenericDataModel>(
   return joined;
 }
 
+/**
+ * Apply index to query with WHERE conditions
+ */
+function applyIndex(
+  query: any,
+  tableName: string,
+  indexName: string,
+  whereClause: WhereClause | undefined,
+  schema: SchemaInfo
+): any {
+  const tableIndexes = schema.tables[tableName]?.indexes;
+
+  if (!tableIndexes) {
+    throw new Error(`Table '${tableName}' not found in schema`);
+  }
+
+  const indexColumns = tableIndexes[indexName];
+  if (!indexColumns) {
+    throw new Error(
+      `Index '${indexName}' not found for table '${tableName}'. ` +
+        `Available indexes: ${Object.keys(tableIndexes).join(", ")}`
+    );
+  }
+
+  // Build the index filter based on WHERE conditions
+  const indexFilter = buildIndexFilter(whereClause, indexColumns, tableName);
+
+  return query.withIndex(indexName, indexFilter);
+}
+
+/**
+ * Build index filter function from WHERE clause
+ */
+function buildIndexFilter(
+  whereClause: WhereClause | undefined,
+  indexColumns: string[],
+  tableName: string
+): (q: any) => any {
+  return (q: any) => {
+    if (!whereClause) {
+      throw new Error(
+        `Index '${indexColumns.join("_and_")}' requires WHERE conditions on columns: ${indexColumns.join(", ")}`
+      );
+    }
+
+    const conditions = extractComparisonConditions(whereClause, tableName);
+    let filterChain = q;
+
+    for (let i = 0; i < indexColumns.length; i++) {
+      const column = indexColumns[i];
+      const isLastColumn = i === indexColumns.length - 1;
+      const condition = conditions.find((c) => c.field === column);
+
+      if (!condition) {
+        if (isLastColumn) {
+          continue;
+        } else {
+          throw new Error(
+            `Index '${indexColumns.join("_and_")}' requires WHERE condition on column '${column}' (prefix column)`
+          );
+        }
+      }
+
+      switch (condition.operator) {
+        case "=":
+          filterChain = filterChain.eq(column, condition.value);
+          break;
+        case ">":
+          if (!isLastColumn) {
+            throw new Error(
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`
+            );
+          }
+          filterChain = filterChain.gt(column, condition.value);
+          break;
+        case "<":
+          if (!isLastColumn) {
+            throw new Error(
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`
+            );
+          }
+          filterChain = filterChain.lt(column, condition.value);
+          break;
+        case ">=":
+          if (!isLastColumn) {
+            throw new Error(
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`
+            );
+          }
+          filterChain = filterChain.gte(column, condition.value);
+          break;
+        case "<=":
+          if (!isLastColumn) {
+            throw new Error(
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`
+            );
+          }
+          filterChain = filterChain.lte(column, condition.value);
+          break;
+        default:
+          throw new Error(
+            `Index '${indexColumns.join("_and_")}' does not support operator '${condition.operator}'`
+          );
+      }
+    }
+
+    return filterChain;
+  };
+}
+
+/**
+ * Check if WHERE clause has conditions not covered by index
+ */
+function hasConditionsNotInIndex(
+  whereClause: WhereClause,
+  indexedFields: Set<string>
+): boolean {
+  function checkWhere(node: WhereClause): boolean {
+    if (node.type === "COMPARISON") {
+      return !indexedFields.has(node.field!);
+    } else if (node.type === "AND") {
+      return checkWhere(node.left!) || checkWhere(node.right!);
+    } else if (node.type === "OR") {
+      return checkWhere(node.left!) || checkWhere(node.right!);
+    }
+    return false;
+  }
+
+  return checkWhere(whereClause);
+}
+
+/**
+ * Extract comparison conditions from WHERE clause for index
+ */
+function extractComparisonConditions(
+  whereClause: WhereClause,
+  tableName: string
+): Array<{ field: string; operator: string; value: any }> {
+  const conditions: Array<{ field: string; operator: string; value: any }> = [];
+
+  function traverseWhere(node: WhereClause): void {
+    if (node.type === "COMPARISON") {
+      if (!node.table || node.table === tableName) {
+        conditions.push({
+          field: node.field!,
+          operator: node.operator!,
+          value: node.value,
+        });
+      }
+    } else if (node.type === "AND") {
+      traverseWhere(node.left!);
+      traverseWhere(node.right!);
+    }
+  }
+
+  traverseWhere(whereClause);
+  return conditions;
+}
+
+/**
+ * Apply ORDER BY in memory
+ */
 function applyOrderBy(results: any[], orderBy: OrderByClause[]): any[] {
   if (orderBy.length === 0) {
     return results;
@@ -568,14 +528,10 @@ function applyOrderBy(results: any[], orderBy: OrderByClause[]): any[] {
 
   return results.slice().sort((a, b) => {
     for (const order of orderBy) {
-      // Get the field key (with table prefix if specified)
       const key = order.table ? `${order.table}.${order.field}` : order.field;
-
-      // Try to get value from row (with or without prefix)
       let aVal = a[key] ?? a[order.field];
       let bVal = b[key] ?? b[order.field];
 
-      // Handle null/undefined values (SQL semantics: nulls sort last in ASC, first in DESC)
       const aIsNull = aVal === null || aVal === undefined;
       const bIsNull = bVal === null || bVal === undefined;
 
@@ -583,14 +539,12 @@ function applyOrderBy(results: any[], orderBy: OrderByClause[]): any[] {
       if (aIsNull) return order.direction === "asc" ? 1 : -1;
       if (bIsNull) return order.direction === "asc" ? -1 : 1;
 
-      // Compare values
       let comparison = 0;
       if (typeof aVal === "string" && typeof bVal === "string") {
         comparison = aVal.localeCompare(bVal);
       } else if (typeof aVal === "number" && typeof bVal === "number") {
         comparison = aVal - bVal;
       } else {
-        // Fallback: convert to string for comparison
         comparison = String(aVal).localeCompare(String(bVal));
       }
 
@@ -602,12 +556,15 @@ function applyOrderBy(results: any[], orderBy: OrderByClause[]): any[] {
   });
 }
 
+/**
+ * Apply GROUP BY with aggregations
+ */
 function applyGroupBy(results: any[], statement: SelectStatement): any[] {
   if (!statement.groupBy || statement.groupBy.length === 0) {
     return results;
   }
 
-  // Build group key for each row
+  // Build groups
   const groups = new Map<string, any[]>();
 
   for (const row of results) {
@@ -618,7 +575,6 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
         ? `${groupCol.table}.${groupCol.field}`
         : groupCol.field;
       const value = row[key] ?? row[groupCol.field];
-      // Use JSON.stringify to handle complex values
       keyParts.push(JSON.stringify(value));
     }
 
@@ -636,7 +592,7 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
   for (const [groupKey, groupRows] of groups.entries()) {
     const resultRow: any = {};
 
-    // Add GROUP BY columns to the result
+    // Add GROUP BY columns
     const groupByColumns: GroupByClause[] = statement.groupBy;
     for (const groupCol of groupByColumns) {
       const key = groupCol.table
@@ -646,7 +602,7 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
       resultRow[key] = value;
     }
 
-    // Compute aggregates for each column in SELECT
+    // Compute aggregates
     for (const col of statement.columns) {
       if (col.type === "FUNCTION") {
         const functionKey = `${col.name}(${formatFunctionArgs(col.args)})`;
@@ -654,22 +610,20 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
         const value = executeFunction(col.name, col.args, null, groupRows);
 
         resultRow[outputKey] = value;
-        // Also store with function key for HAVING clause to find it
         if (col.alias && outputKey !== functionKey) {
           resultRow[functionKey] = value;
         }
       } else if (col.type === "COLUMN") {
-        // Non-aggregate column must be in GROUP BY
         const colKey = col.table ? `${col.table}.${col.name}` : col.name;
         const isInGroupBy = statement.groupBy.some(
           (g) =>
             g.field === col.name &&
-            (g.table === col.table || (!g.table && !col.table)),
+            (g.table === col.table || (!g.table && !col.table))
         );
 
         if (!isInGroupBy) {
           throw new Error(
-            `Column '${colKey}' must appear in GROUP BY clause or be used in an aggregate function`,
+            `Column '${colKey}' must appear in GROUP BY clause or be used in an aggregate function`
           );
         }
 
@@ -677,7 +631,7 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
         resultRow[outputKey] = resultRow[colKey] ?? groupRows[0][col.name];
       } else if (col.type === "STAR" || col.type === "TABLE_STAR") {
         throw new Error(
-          "SELECT * is not allowed with GROUP BY. Specify columns explicitly.",
+          "SELECT * is not allowed with GROUP BY. Specify columns explicitly."
         );
       }
     }
@@ -685,15 +639,15 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
     groupedResults.push(resultRow);
   }
 
-  // Apply HAVING filter if present
+  // Apply HAVING filter
   let filteredResults = groupedResults;
   if (statement.having) {
     filteredResults = groupedResults.filter((row) =>
-      evaluateHaving(row, statement.having!),
+      evaluateHaving(row, statement.having!)
     );
   }
 
-  // Clean up: remove duplicate function keys that were only added for HAVING
+  // Clean up duplicate function keys
   const cleanedResults = filteredResults.map((row) => {
     const cleanRow: any = {};
     for (const col of statement.columns) {
@@ -707,7 +661,6 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
         cleanRow[outputKey] = row[sourceKey] ?? row[col.name];
       }
     }
-    // Also include GROUP BY columns (we know groupBy exists due to function guard)
     if (statement.groupBy) {
       for (const groupCol of statement.groupBy) {
         const key = groupCol.table
@@ -724,6 +677,9 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
   return cleanedResults;
 }
 
+/**
+ * Evaluate HAVING clause
+ */
 function evaluateHaving(row: any, having: WhereClause): boolean {
   if (having.type === "COMPARISON") {
     const value = row[having.field!];
@@ -770,24 +726,24 @@ function evaluateHaving(row: any, having: WhereClause): boolean {
   throw new Error(`Unknown HAVING clause type: ${having.type}`);
 }
 
+/**
+ * Project columns from results
+ */
 function projectColumns(
   results: any[],
   columns: ColumnExpression[],
   fromTable: string,
-  joins?: JoinClause[],
+  joins?: JoinClause[]
 ): any[] {
-  // If the selection is only aggregates (FUNCTION columns) with no plain columns,
-  // compute once and return a single-row result.
+  // If only aggregates, compute once
   const hasOnlyFunctions =
     columns.length > 0 && columns.every((c) => c.type === "FUNCTION");
   const hasAnyFunctions = columns.some((c) => c.type === "FUNCTION");
   const hasAnyPlainColumns = columns.some((c) => c.type === "COLUMN");
 
   if (hasAnyFunctions && hasAnyPlainColumns) {
-    // Real SQL would require GROUP BY for mixing aggregates and non-aggregates.
-    // Keep it simple and error clearly for now.
     throw new Error(
-      "Mixing aggregates with columns requires GROUP BY (not implemented)",
+      "Mixing aggregates with columns requires GROUP BY (not implemented)"
     );
   }
 
@@ -799,25 +755,22 @@ function projectColumns(
     }
     return [row];
   }
+
   // Handle SELECT *
   if (columns.length === 1 && columns[0].type === "STAR") {
-    // If no joins, return as-is
     if (!joins || joins.length === 0) {
       return results;
     }
-
-    // For joins, we need to flatten the prefixed fields
     return results;
   }
 
-  // Handle TABLE_STAR (e.g., users.*)
+  // Handle TABLE_STAR
   if (columns.some((col) => col.type === "TABLE_STAR")) {
     return results.map((row) => {
       const projected: any = {};
 
       for (const col of columns) {
         if (col.type === "TABLE_STAR") {
-          // Include all fields from this table
           for (const [key, value] of Object.entries(row)) {
             if (key.startsWith(`${col.table}.`)) {
               const fieldName = key.split(".")[1];
@@ -858,15 +811,16 @@ function projectColumns(
   });
 }
 
+/**
+ * Build filter expression for WHERE clause
+ */
 function buildFilterExpression(
   q: any,
   where: WhereClause,
-  currentTable: string,
+  currentTable: string
 ): boolean {
   if (where.type === "COMPARISON") {
-    // Only apply filter if it's for the current table (or no table specified)
     if (where.table && where.table !== currentTable) {
-      // This filter is for a different table, skip it for now
       return true;
     }
 
@@ -892,18 +846,21 @@ function buildFilterExpression(
   } else if (where.type === "AND") {
     return q.and(
       buildFilterExpression(q, where.left!, currentTable),
-      buildFilterExpression(q, where.right!, currentTable),
+      buildFilterExpression(q, where.right!, currentTable)
     );
   } else if (where.type === "OR") {
     return q.or(
       buildFilterExpression(q, where.left!, currentTable),
-      buildFilterExpression(q, where.right!, currentTable),
+      buildFilterExpression(q, where.right!, currentTable)
     );
   }
 
   throw new Error(`Unknown WHERE clause type: ${where.type}`);
 }
 
+/**
+ * Format function arguments for display
+ */
 function formatFunctionArgs(args: ColumnExpression[]): string {
   return args
     .map((arg) => {
@@ -923,24 +880,23 @@ function formatFunctionArgs(args: ColumnExpression[]): string {
     .join(", ");
 }
 
+/**
+ * Execute aggregate or scalar function
+ */
 function executeFunction(
   name: string,
   args: ColumnExpression[],
   row: any,
-  allResults: any[],
+  allResults: any[]
 ): any {
   switch (name) {
     case "COUNT":
-      // COUNT(*) returns the total number of rows
       if (args.length === 1 && args[0].type === "STAR") {
         return allResults.length;
       }
-      // Count non-null values in the specified column
       const countArg = args[0];
       if (countArg && countArg.type === "COLUMN") {
-        const key = countArg.table
-          ? `${countArg.table}.${countArg.name}`
-          : countArg.name;
+        const key = countArg.table ? `${countArg.table}.${countArg.name}` : countArg.name;
         return allResults.filter((r) => r[key] !== null && r[key] !== undefined)
           .length;
       }
