@@ -410,7 +410,7 @@ export function SQLQueryEditor() {
                       key={i}
                       className={changedRows.has(i) ? "animate-highlight" : ""}
                     >
-                      {Object.values(row).map((value, j) => (
+                      {Object.entries(row).map(([key, value], j) => (
                         <TableCell key={j} className="font-mono text-xs">
                           {typeof value === "boolean" ? (
                             <Badge variant={value ? "default" : "secondary"} className="text-[10px]">
@@ -418,6 +418,17 @@ export function SQLQueryEditor() {
                             </Badge>
                           ) : value === null ? (
                             <span className="text-[var(--color-muted-foreground)] italic">null</span>
+                          ) : key === "_creationTime" && typeof value === "number" ? (
+                            <span className="whitespace-nowrap">
+                              {new Date(value).toLocaleString(undefined, {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                              })}
+                            </span>
                           ) : (
                             String(value)
                           )}
