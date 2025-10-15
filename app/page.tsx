@@ -21,6 +21,10 @@ export default function Home() {
               A not so serious experiment in bringing a read-only SQL query syntax to Convex's
               real-time database.
             </p>
+            <p className="text-sm text-[var(--color-muted-foreground)] max-w-md text-center leading-relaxed">
+              I thought it might be useful for when I want to do text queries against my data. I have put next to zero thought into the practicality of this in a real project.
+            </p>
+
           </div>
         </div>
       </main>
