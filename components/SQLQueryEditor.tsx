@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,15 +19,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import { Play, Database, Trash2, AlertCircle, Loader2, Radio, Zap } from "lucide-react";
+import { Play, Loader2 } from "lucide-react";
 import Editor from "react-simple-code-editor";
 import Prism from "prismjs";
 import "prismjs/components/prism-sql";
-import { Lexer } from "@/lib/sql/lexer";
-import { Parser } from "@/lib/sql/parser";
 
 const EXAMPLE_QUERIES = [
   {
@@ -87,31 +82,12 @@ export function SQLQueryEditor() {
   const [executedQuery, setExecutedQuery] = useState(EXAMPLE_QUERIES[0].query);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [changedRows, setChangedRows] = useState<Set<number>>(new Set());
-  const [autoExecute, setAutoExecute] = useState(false);
-  const [isValidSyntax, setIsValidSyntax] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [executionTime, setExecutionTime] = useState<number | null>(null);
   const previousResults = useRef<any[] | null>(null);
-  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
   const queryStartTime = useRef<number | null>(null);
 
-  const seedDatabase = useMutation(api.seedData.seedDatabase);
-  const clearDatabase = useMutation(api.seedData.clearDatabase);
-
   const response = useQuery(api.sqlQueries.runSQL, { sql: executedQuery });
-
-  // Validate SQL syntax
-  const validateSQL = (query: string): boolean => {
-    try {
-      const lexer = new Lexer(query);
-      const tokens = lexer.tokenize();
-      const parser = new Parser(tokens);
-      parser.parse();
-      return true;
-    } catch (error) {
-      return false;
-    }
-  };
 
   const handleExecute = () => {
     setExecutedQuery(sql);
@@ -121,44 +97,8 @@ export function SQLQueryEditor() {
     setExecutionTime(null);
   };
 
-  // Auto-execute effect with debouncing
-  useEffect(() => {
-    if (!autoExecute) {
-      // Clear any pending timers if auto-execute is disabled
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
-      return;
-    }
-
-    // Validate syntax
-    const isValid = validateSQL(sql);
-    setIsValidSyntax(isValid);
-
-    if (!isValid) return;
-
-    // Debounce the execution
-    if (debounceTimer.current) {
-      clearTimeout(debounceTimer.current);
-    }
-
-    debounceTimer.current = setTimeout(() => {
-      setExecutedQuery(sql);
-      previousResults.current = null; // Reset tracking on new query
-      setChangedRows(new Set());
-      queryStartTime.current = performance.now();
-      setExecutionTime(null);
-    }, 500); // 500ms debounce
-
-    return () => {
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
-    };
-  }, [sql, autoExecute]);
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !autoExecute) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
       handleExecute();
     }
@@ -210,48 +150,10 @@ export function SQLQueryEditor() {
   }, [results, response]);
 
   return (
-    <div className="flex flex-col gap-6 w-full">
-      <div className="flex gap-2 items-center justify-between">
-        <div className="flex gap-2">
-          <Button
-            onClick={() => void seedDatabase()}
-            variant="outline"
-            size="sm"
-          >
-            <Database className="mr-2 h-4 w-4" />
-            Seed Sample Data
-          </Button>
-          <Button
-            onClick={() => void clearDatabase()}
-            variant="outline"
-            size="sm"
-          >
-            <Trash2 className="mr-2 h-4 w-4" />
-            Clear Data
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-4 border rounded-lg p-6 bg-[var(--color-card)] shadow-sm">
-        <div className="flex items-center justify-between">
-          <label className="text-sm font-semibold">SQL Query</label>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="font-mono text-[10px]">
-              READ-ONLY
-            </Badge>
-            {autoExecute && !isValidSyntax && (
-              <Badge variant="destructive" className="text-[10px]">
-                Invalid Syntax
-              </Badge>
-            )}
-          </div>
-        </div>
+    <div className="flex flex-col gap-8 w-full">
+      <div className="flex flex-col gap-4">
         <div
-          className={`border rounded-md bg-[var(--color-muted)]/30 overflow-hidden transition-all ${
-            autoExecute
-              ? "border-[var(--color-primary)] shadow-sm shadow-[var(--color-primary)]/20"
-              : "border-[var(--color-muted-foreground)]/20"
-          }`}
+          className="border-2 rounded-lg bg-[var(--color-card)] overflow-hidden border-[var(--color-muted-foreground)]/20 hover:border-[var(--color-muted-foreground)]/30 transition-colors shadow-sm"
           onKeyDown={handleKeyDown}
         >
           {mounted ? (
@@ -259,12 +161,13 @@ export function SQLQueryEditor() {
               value={sql}
               onValueChange={setSql}
               highlight={(code) => Prism.highlight(code, Prism.languages.sql, "sql")}
-              padding={12}
+              padding={16}
               style={{
                 fontFamily: "var(--font-geist-mono), monospace",
                 fontSize: 14,
-                minHeight: "140px",
+                minHeight: "160px",
                 backgroundColor: "transparent",
+                lineHeight: "1.6",
               }}
               textareaClassName="focus:outline-none"
               placeholder="SELECT * FROM users WHERE age > 18"
@@ -274,131 +177,81 @@ export function SQLQueryEditor() {
               style={{
                 fontFamily: "var(--font-geist-mono), monospace",
                 fontSize: 14,
-                minHeight: "140px",
-                padding: 12,
+                minHeight: "160px",
+                padding: 16,
                 color: "var(--color-foreground)",
+                lineHeight: "1.6",
               }}
             >
               {sql}
             </div>
           )}
         </div>
-        <div className="flex gap-2 items-center">
-          <Button
-            onClick={handleExecute}
-            size="default"
-            disabled={autoExecute}
-          >
-            <Play className="mr-2 h-4 w-4" />
-            Execute Query
-          </Button>
-          <Select onValueChange={setSql}>
-            <SelectTrigger className="w-[240px]">
-              <SelectValue placeholder="Load example..." />
-            </SelectTrigger>
-            <SelectContent>
-              {EXAMPLE_QUERIES.map((example, i) => (
-                <SelectItem key={i} value={example.query}>
-                  {example.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="ml-auto flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Switch
-                id="auto-execute"
-                checked={autoExecute}
-                onCheckedChange={setAutoExecute}
-              />
-              <label
-                htmlFor="auto-execute"
-                className="text-sm font-medium cursor-pointer flex items-center gap-1"
-              >
-                <Zap className={`h-4 w-4 ${autoExecute ? "text-[var(--color-primary)]" : ""}`} />
-                Auto-execute
-              </label>
-            </div>
-            {!autoExecute && (
-              <Badge variant="secondary" className="font-mono text-[10px]">
-                <span className="text-xs mr-1">⌘</span>+ Enter
-              </Badge>
+        <div className="flex gap-3 items-center justify-between">
+          <div className="flex gap-2 items-center">
+            <Button
+              onClick={handleExecute}
+              size="sm"
+              variant="ghost"
+            >
+              <Play className="h-4 w-4" />
+            </Button>
+            <Select onValueChange={setSql}>
+              <SelectTrigger className="w-[200px] h-8 border-[var(--color-muted-foreground)]/10">
+                <SelectValue placeholder="examples" />
+              </SelectTrigger>
+              <SelectContent>
+                {EXAMPLE_QUERIES.map((example, i) => (
+                  <SelectItem key={i} value={example.query}>
+                    {example.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-3">
+            {executionTime !== null && (
+              <span className="text-xs text-[var(--color-muted-foreground)] font-mono">
+                {executionTime < 1000
+                  ? `${executionTime.toFixed(0)}ms`
+                  : `${(executionTime / 1000).toFixed(2)}s`
+                }
+              </span>
+            )}
+            {results && (
+              <span className="text-xs text-[var(--color-muted-foreground)]">
+                {results.length} row{results.length !== 1 ? "s" : ""}
+              </span>
             )}
           </div>
         </div>
       </div>
 
       <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-semibold">Results</label>
-            {results && results.length > 0 && (
-              <Badge variant="default" className="animate-pulse bg-[var(--color-primary)]">
-                <Radio className="h-3 w-3 mr-1" />
-                LIVE
-              </Badge>
-            )}
-            {autoExecute && (
-              <Badge variant="secondary" className="bg-[var(--color-accent)]/30 border-[var(--color-accent)]">
-                <Zap className="h-3 w-3 mr-1" />
-                Auto-execute ON
-              </Badge>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {executionTime !== null && (
-              <Badge variant="outline" className="font-mono">
-                {executionTime < 1000
-                  ? `${executionTime.toFixed(0)}ms`
-                  : `${(executionTime / 1000).toFixed(2)}s`
-                }
-              </Badge>
-            )}
-            {lastUpdated && (
-              <span className="text-xs text-[var(--color-muted-foreground)]">
-                Updated {lastUpdated.toLocaleTimeString()}
-              </span>
-            )}
-            {results && (
-              <Badge variant="outline">
-                {results.length} row{results.length !== 1 ? "s" : ""}
-              </Badge>
-            )}
-          </div>
-        </div>
         {response === undefined ? (
-          <div className="flex items-center justify-center p-16 border rounded-lg bg-[var(--color-card)] shadow-sm">
-            <Loader2 className="h-6 w-6 animate-spin text-[var(--color-primary)]" />
-            <span className="ml-3 text-sm text-[var(--color-muted-foreground)]">
-              Executing query...
-            </span>
+          <div className="flex items-center justify-center p-16">
+            <Loader2 className="h-5 w-5 animate-spin text-[var(--color-muted-foreground)]" />
           </div>
         ) : error ? (
-          <Alert variant="destructive" className="shadow-sm">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Query Error</AlertTitle>
-            <AlertDescription className="font-mono text-xs mt-2">
+          <div className="border border-red-500/20 rounded-md p-4 bg-red-500/5">
+            <p className="font-mono text-xs text-red-500">
               {error}
-            </AlertDescription>
-          </Alert>
-        ) : results && results.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-16 border rounded-lg bg-[var(--color-card)] shadow-sm">
-            <Database className="h-12 w-12 text-[var(--color-muted-foreground)]/40 mb-3" />
-            <p className="text-sm font-medium text-[var(--color-muted-foreground)]">
-              No results found
             </p>
-            <p className="text-xs text-[var(--color-muted-foreground)] mt-1">
-              Try seeding sample data or adjusting your query
+          </div>
+        ) : results && results.length === 0 ? (
+          <div className="flex items-center justify-center p-16">
+            <p className="text-xs text-[var(--color-muted-foreground)]">
+              no results
             </p>
           </div>
         ) : results && results.length > 0 ? (
-          <div className="rounded-lg border bg-[var(--color-card)] shadow-sm overflow-hidden">
-            <div className="max-h-[500px] overflow-auto">
+          <div className="rounded-lg border-2 border-[var(--color-muted-foreground)]/20 overflow-hidden bg-[var(--color-card)] shadow-sm">
+            <div className="max-h-[600px] overflow-auto">
               <Table>
-                <TableHeader className="sticky top-0 bg-[var(--color-muted)] backdrop-blur-sm border-b">
-                  <TableRow className="hover:bg-[var(--color-muted)]">
+                <TableHeader className="sticky top-0 bg-[var(--color-card)] backdrop-blur-sm border-b-2 border-[var(--color-muted-foreground)]/20">
+                  <TableRow className="hover:bg-transparent">
                     {Object.keys(results[0]).map((key) => (
-                      <TableHead key={key} className="font-semibold text-[var(--color-foreground)]">
+                      <TableHead key={key} className="text-xs font-semibold text-[var(--color-foreground)]/70">
                         {key}
                       </TableHead>
                     ))}
@@ -408,14 +261,14 @@ export function SQLQueryEditor() {
                   {results.map((row, i) => (
                     <TableRow
                       key={i}
-                      className={changedRows.has(i) ? "animate-highlight" : ""}
+                      className={`border-[var(--color-muted-foreground)]/10 hover:bg-[var(--color-muted)]/30 transition-colors ${changedRows.has(i) ? "animate-highlight" : ""}`}
                     >
                       {Object.entries(row).map(([key, value], j) => (
-                        <TableCell key={j} className="font-mono text-xs">
+                        <TableCell key={j} className="font-mono text-xs text-[var(--color-foreground)]">
                           {typeof value === "boolean" ? (
-                            <Badge variant={value ? "default" : "secondary"} className="text-[10px]">
+                            <span>
                               {value.toString()}
-                            </Badge>
+                            </span>
                           ) : value === null ? (
                             <span className="text-[var(--color-muted-foreground)] italic">null</span>
                           ) : key === "_creationTime" && typeof value === "number" ? (
