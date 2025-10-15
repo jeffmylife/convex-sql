@@ -107,93 +107,134 @@
     animation: highlight 2s ease-out;
   }
 
-  /* Custom Prism syntax highlighting - High contrast color scheme */
-  .token.comment,
-  .token.prolog,
-  .token.doctype,
-  .token.cdata {
-    color: hsl(var(--muted-foreground));
+  /* Custom Prism syntax highlighting */
+
+  /* Light mode - clear, high contrast colors */
+  :root:not(.dark) .token.comment,
+  :root:not(.dark) .token.prolog,
+  :root:not(.dark) .token.doctype,
+  :root:not(.dark) .token.cdata {
+    color: #6b7280;
     font-style: italic;
   }
 
-  /* SQL Keywords - Bold vibrant blue */
-  .token.keyword {
+  :root:not(.dark) .token.keyword {
     color: #2563eb;
     font-weight: 700;
   }
 
-  /* Strings - Vibrant orange for high contrast */
-  .token.string,
-  .token.char,
-  .token.attr-value {
+  :root:not(.dark) .token.string,
+  :root:not(.dark) .token.char,
+  :root:not(.dark) .token.attr-value {
     color: #ea580c;
     font-weight: 500;
   }
 
-  /* Numbers and booleans - Deep green */
-  .token.number,
-  .token.boolean,
-  .token.constant {
+  :root:not(.dark) .token.number,
+  :root:not(.dark) .token.boolean,
+  :root:not(.dark) .token.constant {
     color: #16a34a;
     font-weight: 600;
   }
 
-  /* Operators - Purple for distinction */
-  .token.operator {
+  :root:not(.dark) .token.operator {
     color: #9333ea;
     font-weight: 600;
   }
 
-  /* Functions and identifiers */
-  .token.function,
-  .token.class-name {
+  :root:not(.dark) .token.function,
+  :root:not(.dark) .token.class-name {
     color: #0891b2;
     font-weight: 500;
   }
 
-  /* Punctuation - More visible */
-  .token.punctuation {
-    color: hsl(var(--foreground));
-    opacity: 0.8;
+  :root:not(.dark) .token.punctuation {
+    color: #1f2937;
+    font-weight: 600;
   }
 
-  .token.selector,
-  .token.important,
-  .token.atrule,
-  .token.builtin {
+  :root:not(.dark) .token.variable {
+    color: #7c3aed;
+    font-weight: 700;
+  }
+
+  :root:not(.dark) .token.selector,
+  :root:not(.dark) .token.important,
+  :root:not(.dark) .token.atrule,
+  :root:not(.dark) .token.builtin,
+  :root:not(.dark) .token.symbol {
     color: #2563eb;
     font-weight: 600;
   }
 
-  /* Dark mode adjustments */
+  /* Special handling for @ symbol in table hints */
+  :root:not(.dark) .token.operator[class*="@"] {
+    color: #2563eb;
+    font-weight: 700;
+  }
+
+  /* Dark mode - prism-tomorrow inspired */
+  .dark .token.comment,
+  .dark .token.prolog,
+  .dark .token.doctype,
+  .dark .token.cdata {
+    color: #999999;
+    font-style: italic;
+  }
+
   .dark .token.keyword {
-    color: #60a5fa;
+    color: #cc99cd;
     font-weight: 700;
   }
 
   .dark .token.string,
   .dark .token.char,
   .dark .token.attr-value {
-    color: #fb923c;
+    color: #7ec699;
     font-weight: 500;
   }
 
   .dark .token.number,
   .dark .token.boolean,
   .dark .token.constant {
-    color: #4ade80;
+    color: #f08d49;
     font-weight: 600;
   }
 
   .dark .token.operator {
-    color: #c084fc;
+    color: #67cdcc;
     font-weight: 600;
   }
 
   .dark .token.function,
   .dark .token.class-name {
-    color: #22d3ee;
+    color: #6699cc;
     font-weight: 500;
+  }
+
+  .dark .token.punctuation {
+    color: #cccccc;
+    font-weight: 600;
+  }
+
+  .dark .token.variable {
+    color: #f99157;
+    font-weight: 700;
+  }
+
+  .dark .token.selector,
+  .dark .token.important,
+  .dark .token.atrule,
+  .dark .token.builtin,
+  .dark .token.symbol {
+    color: #cc99cd;
+    font-weight: 600;
+  }
+
+  /* Special handling for @ symbol in table hints */
+  .dark .token.operator[class*="@"] {
+    color: #cc99cd;
+    font-weight: 700;
   }
 
   /* Code editor placeholder styling */
