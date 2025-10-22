@@ -19,10 +19,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Play, Loader2 } from "lucide-react";
+import { Play, Loader2, Trash2 } from "lucide-react";
 import Editor from "react-simple-code-editor";
 import Prism from "prismjs";
 import "prismjs/components/prism-sql";
+import { DropTableModal } from "@/components/DropTableModal";
 
 const EXAMPLE_QUERIES = [
   {
@@ -84,12 +85,22 @@ export function SQLQueryEditor() {
   const [changedRows, setChangedRows] = useState<Set<number>>(new Set());
   const [mounted, setMounted] = useState(false);
   const [executionTime, setExecutionTime] = useState<number | null>(null);
+  const [dropModalOpen, setDropModalOpen] = useState(false);
+  const [tableToDelete, setTableToDelete] = useState("");
   const previousResults = useRef<any[] | null>(null);
   const queryStartTime = useRef<number | null>(null);
 
   const response = useQuery(api.sqlQueries.runSQL, { sql: executedQuery });
 
   const handleExecute = () => {
+    // Check if query contains DROP command
+    const dropMatch = sql.match(/DROP\s+TABLE\s+(\w+)/i);
+    if (dropMatch) {
+      const tableName = dropMatch[1];
+      handleDropTable(tableName);
+      return;
+    }
+
     setExecutedQuery(sql);
     previousResults.current = null; // Reset tracking on new query
     setChangedRows(new Set());
@@ -102,6 +113,11 @@ export function SQLQueryEditor() {
       e.preventDefault();
       handleExecute();
     }
+  };
+
+  const handleDropTable = (tableName: string) => {
+    setTableToDelete(tableName);
+    setDropModalOpen(true);
   };
 
   const results = response?.success ? response.data : null;
@@ -295,6 +311,12 @@ export function SQLQueryEditor() {
           </div>
         ) : null}
       </div>
+
+      <DropTableModal
+        open={dropModalOpen}
+        onOpenChange={setDropModalOpen}
+        tableName={tableToDelete}
+      />
     </div>
   );
 }

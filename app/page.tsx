@@ -1,9 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import { SQLQueryEditor } from "@/components/SQLQueryEditor";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
+import { Trash2 } from "lucide-react";
+import { DropTableModal } from "@/components/DropTableModal";
 
 export default function Home() {
+  const [dropModalOpen, setDropModalOpen] = useState(false);
+  const [tableToDelete, setTableToDelete] = useState("");
+
+  const handleDropTable = (tableName: string) => {
+    setTableToDelete(tableName);
+    setDropModalOpen(true);
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
       <div className="fixed top-4 right-4 z-10">
@@ -33,9 +45,25 @@ export default function Home() {
             <p className="text-sm text-[var(--color-muted-foreground)] max-w-md text-center leading-relaxed">
               I thought it might be useful for when I want to do text queries against my data. I have put next to zero thought into the practicality of this in a real project.
             </p>
+            <div className="pt-6">
+              <Button
+                onClick={() => handleDropTable("users")}
+                size="sm"
+                variant="destructive"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Drop Table
+              </Button>
+            </div>
           </div>
         </div>
       </main>
+
+      <DropTableModal
+        open={dropModalOpen}
+        onOpenChange={setDropModalOpen}
+        tableName={tableToDelete}
+      />
       <footer className="pb-8 pt-4">
         <div className="container mx-auto flex justify-center">
           <a
