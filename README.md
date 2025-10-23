@@ -13,6 +13,12 @@ A read-only SQL-like query interface built on top of Convex. Execute SQL queries
 
 ## Getting Started
 
+### Prerequisites
+
+This project requires a Convex database. If you don't have Convex set up yet, follow the [Convex Next.js Quickstart Guide](https://docs.convex.dev/quickstart/nextjs) to:
+
+### Setup
+
 1. Install dependencies:
 ```bash
 pnpm install
@@ -24,3 +30,10 @@ pnpm run dev
 ```
 
 3. Open your browser and start querying your Convex data with SQL!
+
+## Testing
+
+Run all tests:
+```bash
+pnpm test
+```
