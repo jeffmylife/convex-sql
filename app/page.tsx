@@ -4,7 +4,7 @@ import { useState } from "react";
 import { SQLQueryEditor } from "@/components/SQLQueryEditor";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { Trash2 } from "lucide-react";
+import { Trash2, Github } from "lucide-react";
 import { DropTableModal } from "@/components/DropTableModal";
 
 export default function Home() {
@@ -65,7 +65,7 @@ export default function Home() {
         tableName={tableToDelete}
       />
       <footer className="pb-8 pt-4">
-        <div className="container mx-auto flex justify-center">
+        <div className="container mx-auto flex justify-center items-center space-x-6">
           <a
             href="https://x.com/jeffreylemoine"
             target="_blank"
@@ -73,6 +73,14 @@ export default function Home() {
             className="text-xs text-[var(--color-muted-foreground)]/60 hover:text-[var(--color-muted-foreground)] transition-colors font-mono"
           >
             @jeffreylemoine on X
+          </a>
+          <a
+            href="https://github.com/jeffmylife/convex-sql"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--color-muted-foreground)]/60 hover:text-[var(--color-muted-foreground)] transition-colors"
+          >
+            <Github className="h-4 w-4" />
           </a>
         </div>
       </footer>
