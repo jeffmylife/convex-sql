@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Play, Loader2, Trash2 } from "lucide-react";
+import { Play, Loader2 } from "lucide-react";
 import Editor from "react-simple-code-editor";
 import Prism from "prismjs";
 import "prismjs/components/prism-sql";
@@ -81,13 +81,12 @@ HAVING COUNT(*) > 1`,
 export function SQLQueryEditor() {
   const [sql, setSql] = useState(EXAMPLE_QUERIES[0].query);
   const [executedQuery, setExecutedQuery] = useState(EXAMPLE_QUERIES[0].query);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [changedRows, setChangedRows] = useState<Set<number>>(new Set());
   const [mounted, setMounted] = useState(false);
   const [executionTime, setExecutionTime] = useState<number | null>(null);
   const [dropModalOpen, setDropModalOpen] = useState(false);
   const [tableToDelete, setTableToDelete] = useState("");
-  const previousResults = useRef<any[] | null>(null);
+  const previousResults = useRef<Record<string, unknown>[] | null>(null);
   const queryStartTime = useRef<number | null>(null);
 
   const response = useQuery(api.sqlQueries.runSQL, { sql: executedQuery });
@@ -138,8 +137,6 @@ export function SQLQueryEditor() {
     }
 
     if (results && results.length > 0) {
-      setLastUpdated(new Date());
-
       if (previousResults.current) {
         const newChangedRows = new Set<number>();
         const prevResultsStr = JSON.stringify(previousResults.current);

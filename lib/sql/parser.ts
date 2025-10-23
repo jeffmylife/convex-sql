@@ -23,28 +23,45 @@ export class Parser {
     }
 
     const firstToken = this.tokens[0];
-    if (firstToken.type !== "KEYWORD" || !firstToken.value || firstToken.value.trim() === "") {
-      throw new Error(firstToken.value ? `Expected SQL command, got: ${firstToken.value}` : "Empty SQL query");
+    if (
+      firstToken.type !== "KEYWORD" ||
+      !firstToken.value ||
+      firstToken.value.trim() === ""
+    ) {
+      throw new Error(
+        firstToken.value
+          ? `Expected SQL command, got: ${firstToken.value}`
+          : "Empty SQL query",
+      );
     }
 
     const command = firstToken.value.toUpperCase();
 
     // Only SELECT is supported - reject all write operations
     const unsupportedCommands = [
-      "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
-      "TRUNCATE", "REPLACE", "MERGE", "GRANT", "REVOKE"
+      "INSERT",
+      "UPDATE",
+      "DELETE",
+      "DROP",
+      "CREATE",
+      "ALTER",
+      "TRUNCATE",
+      "REPLACE",
+      "MERGE",
+      "GRANT",
+      "REVOKE",
     ];
 
     if (unsupportedCommands.includes(command)) {
       throw new Error(
         `Write operations are not supported. '${command}' is a write operation. ` +
-        `Only SELECT queries are allowed for safety.`
+          `Only SELECT queries are allowed for safety.`,
       );
     }
 
     if (command !== "SELECT") {
       throw new Error(
-        `Unsupported SQL command: '${command}'. Only SELECT queries are supported.`
+        `Unsupported SQL command: '${command}'. Only SELECT queries are supported.`,
       );
     }
 
@@ -230,7 +247,13 @@ export class Parser {
 
     this.consume("KEYWORD", "ON");
 
-    const conditions: any[] = [];
+    const conditions: Array<{
+      leftTable: string;
+      leftField: string;
+      operator: "=";
+      rightTable: string;
+      rightField: string;
+    }> = [];
 
     const parseJoinEquality = () => {
       const leftTable = this.consume("IDENTIFIER").value;

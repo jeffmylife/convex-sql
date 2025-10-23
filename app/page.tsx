@@ -39,7 +39,7 @@ export default function Home() {
               had SQL?
             </h1>
             <p className="text-sm text-[var(--color-muted-foreground)] max-w-md text-center leading-relaxed">
-              A not so serious experiment in bringing a read-only SQL query syntax to Convex's
+              A not so serious experiment in bringing a read-only SQL query syntax to Convex&apos;s
               real-time database.
             </p>
             <p className="text-sm text-[var(--color-muted-foreground)] max-w-md text-center leading-relaxed">

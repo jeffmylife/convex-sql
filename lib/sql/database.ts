@@ -20,7 +20,10 @@ export interface TableInfo {
  */
 export interface QueryBuilder {
   /** Apply an index with filter conditions */
-  withIndex(indexName: string, filterFn: (q: IndexFilterBuilder) => any): QueryBuilder;
+  withIndex(
+    indexName: string,
+    filterFn: (q: IndexFilterBuilder) => IndexFilterBuilder,
+  ): QueryBuilder;
 
   /** Apply a filter predicate */
   filter(filterFn: (q: FilterBuilder) => boolean): QueryBuilder;
@@ -29,34 +32,34 @@ export interface QueryBuilder {
   order(direction: "asc" | "desc"): QueryBuilder;
 
   /** Take first N results */
-  take(n: number): Promise<any[]>;
+  take(n: number): Promise<Record<string, unknown>[]>;
 
   /** Collect all results */
-  collect(): Promise<any[]>;
+  collect(): Promise<Record<string, unknown>[]>;
 }
 
 /**
  * Filter builder for index queries
  */
 export interface IndexFilterBuilder {
-  eq(field: string, value: any): any;
-  gt(field: string, value: any): any;
-  lt(field: string, value: any): any;
-  gte(field: string, value: any): any;
-  lte(field: string, value: any): any;
+  eq(field: string, value: unknown): IndexFilterBuilder;
+  gt(field: string, value: unknown): IndexFilterBuilder;
+  lt(field: string, value: unknown): IndexFilterBuilder;
+  gte(field: string, value: unknown): IndexFilterBuilder;
+  lte(field: string, value: unknown): IndexFilterBuilder;
 }
 
 /**
  * Filter builder for WHERE clauses
  */
 export interface FilterBuilder {
-  field(name: string): any;
-  eq(field: any, value: any): boolean;
-  neq(field: any, value: any): boolean;
-  gt(field: any, value: any): boolean;
-  lt(field: any, value: any): boolean;
-  gte(field: any, value: any): boolean;
-  lte(field: any, value: any): boolean;
+  field(name: string): unknown;
+  eq(field: unknown, value: unknown): boolean;
+  neq(field: unknown, value: unknown): boolean;
+  gt(field: unknown, value: unknown): boolean;
+  lt(field: unknown, value: unknown): boolean;
+  gte(field: unknown, value: unknown): boolean;
+  lte(field: unknown, value: unknown): boolean;
   and(left: boolean, right: boolean): boolean;
   or(left: boolean, right: boolean): boolean;
 }

@@ -48,7 +48,7 @@ export function DropTableModal({
               </DialogTitle>
               <DialogDescription className="pt-4 space-y-3 text-base">
                 <p className="font-semibold">
-                  Please don't do it, everything will be lost and I forgot to
+                  Please don&apos;t do it, everything will be lost and I forgot to
                   use backups.
                 </p>
                 <p className="text-sm text-[var(--color-muted-foreground)]">

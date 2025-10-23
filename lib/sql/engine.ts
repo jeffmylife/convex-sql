@@ -12,7 +12,13 @@ import {
   GroupByClause,
   OrderByClause,
 } from "./types";
-import { DatabaseContext, SchemaInfo } from "./database";
+import {
+  DatabaseContext,
+  SchemaInfo,
+  QueryBuilder,
+  IndexFilterBuilder,
+  FilterBuilder,
+} from "./database";
 import { QueryLimits, DEFAULT_LIMITS } from "./limits";
 
 /**
@@ -26,8 +32,8 @@ import { QueryLimits, DEFAULT_LIMITS } from "./limits";
 export async function executeSQL(
   ctx: DatabaseContext,
   sql: string,
-  limits: QueryLimits = DEFAULT_LIMITS
-): Promise<any[]> {
+  limits: QueryLimits = DEFAULT_LIMITS,
+): Promise<Record<string, unknown>[]> {
   // Parse SQL
   const lexer = new Lexer(sql);
   const tokens = lexer.tokenize();
@@ -57,17 +63,25 @@ function hasOnlyAggregateFunctions(statement: SelectStatement): boolean {
 /**
  * Validate query against configured limits
  */
-function validateQueryLimits(statement: SelectStatement, limits: QueryLimits): void {
+function validateQueryLimits(
+  statement: SelectStatement,
+  limits: QueryLimits,
+): void {
   const isAggregateOnly = hasOnlyAggregateFunctions(statement);
 
   // Check if LIMIT is required and missing
-  if (limits.requireLimit && !statement.limit && !statement.groupBy && !isAggregateOnly) {
+  if (
+    limits.requireLimit &&
+    !statement.limit &&
+    !statement.groupBy &&
+    !isAggregateOnly
+  ) {
     // Check if table is exempt
     if (!limits.exemptTables.includes(statement.from)) {
       throw new Error(
         `Query must include a LIMIT clause for table '${statement.from}'. ` +
-        `Maximum allowed LIMIT is ${limits.maxLimit}. ` +
-        `This prevents accidentally reading large tables.`
+          `Maximum allowed LIMIT is ${limits.maxLimit}. ` +
+          `This prevents accidentally reading large tables.`,
       );
     }
   }
@@ -76,7 +90,7 @@ function validateQueryLimits(statement: SelectStatement, limits: QueryLimits): v
   if (statement.limit && statement.limit > limits.maxLimit) {
     throw new Error(
       `LIMIT ${statement.limit} exceeds maximum allowed limit of ${limits.maxLimit}. ` +
-      `Reduce your LIMIT or contact administrator to increase limits.`
+        `Reduce your LIMIT or contact administrator to increase limits.`,
     );
   }
 
@@ -93,8 +107,8 @@ function validateQueryLimits(statement: SelectStatement, limits: QueryLimits): v
 export async function executeSQLStatement(
   ctx: DatabaseContext,
   statement: SelectStatement,
-  limits: QueryLimits = DEFAULT_LIMITS
-): Promise<any[]> {
+  limits: QueryLimits = DEFAULT_LIMITS,
+): Promise<Record<string, unknown>[]> {
   const schema = ctx.getSchema();
 
   // Validate table exists
@@ -117,17 +131,18 @@ export async function executeSQLStatement(
       statement.from,
       statement.fromIndex,
       statement.where,
-      schema
+      schema,
     );
 
     // Also apply any WHERE conditions not covered by the index
     if (statement.where) {
-      const indexColumns = schema.tables[statement.from]?.indexes[statement.fromIndex] || [];
+      const indexColumns =
+        schema.tables[statement.from]?.indexes[statement.fromIndex] || [];
       const indexedFields = new Set(indexColumns);
 
       if (hasConditionsNotInIndex(statement.where, indexedFields)) {
         query = query.filter((q) =>
-          buildFilterExpression(q, statement.where!, statement.from)
+          buildFilterExpression(q, statement.where!, statement.from),
         );
       }
     }
@@ -135,7 +150,7 @@ export async function executeSQLStatement(
     // Apply WHERE clause as filter
     if (statement.where) {
       query = query.filter((q) =>
-        buildFilterExpression(q, statement.where!, statement.from)
+        buildFilterExpression(q, statement.where!, statement.from),
       );
     }
   }
@@ -151,7 +166,8 @@ export async function executeSQLStatement(
     if (firstOrder.field === "_creationTime") {
       canUseNativeOrdering = true;
     } else if (statement.fromIndex) {
-      const indexColumns = schema.tables[statement.from]?.indexes[statement.fromIndex] || [];
+      const indexColumns =
+        schema.tables[statement.from]?.indexes[statement.fromIndex] || [];
       if (indexColumns.length > 0 && indexColumns[0] === firstOrder.field) {
         canUseNativeOrdering = true;
       }
@@ -164,7 +180,11 @@ export async function executeSQLStatement(
   // Execute query
   let results;
   try {
-    if (canUseNativeOrdering && statement.orderBy && statement.orderBy.length > 0) {
+    if (
+      canUseNativeOrdering &&
+      statement.orderBy &&
+      statement.orderBy.length > 0
+    ) {
       const direction = statement.orderBy[0].direction;
       const orderedQuery = query.order(direction);
 
@@ -177,8 +197,12 @@ export async function executeSQLStatement(
     } else {
       results = await query.collect();
     }
-  } catch (error: any) {
-    if (error.message && error.message.includes("does not exist")) {
+  } catch (error: unknown) {
+    if (
+      error instanceof Error &&
+      error.message &&
+      error.message.includes("does not exist")
+    ) {
       throw new Error(`Table '${statement.from}' does not exist`);
     }
     throw error;
@@ -187,12 +211,18 @@ export async function executeSQLStatement(
   // Apply GROUP BY if present (must be before LIMIT for correct SQL semantics)
   if (statement.groupBy && statement.groupBy.length > 0) {
     const grouped = applyGroupBy(results, statement);
-    const ordered = statement.orderBy ? applyOrderBy(grouped, statement.orderBy) : grouped;
+    const ordered = statement.orderBy
+      ? applyOrderBy(grouped, statement.orderBy)
+      : grouped;
     return statement.limit ? ordered.slice(0, statement.limit) : ordered;
   }
 
   // Apply in-memory ORDER BY if we couldn't use native ordering
-  if (!canUseNativeOrdering && statement.orderBy && statement.orderBy.length > 0) {
+  if (
+    !canUseNativeOrdering &&
+    statement.orderBy &&
+    statement.orderBy.length > 0
+  ) {
     results = applyOrderBy(results, statement.orderBy);
   }
 
@@ -208,7 +238,9 @@ export async function executeSQLStatement(
   // Apply LIMIT AFTER aggregates for aggregate-only queries
   if (isAggregateOnly && statement.limit) {
     const limited = projected.slice(0, statement.limit);
-    return limited.length > limits.maxRows ? limited.slice(0, limits.maxRows) : limited;
+    return limited.length > limits.maxRows
+      ? limited.slice(0, limits.maxRows)
+      : limited;
   }
 
   // Enforce maximum result size
@@ -226,8 +258,8 @@ async function executeSelectWithJoin(
   ctx: DatabaseContext,
   statement: SelectStatement,
   schema: SchemaInfo,
-  limits: QueryLimits
-): Promise<any[]> {
+  limits: QueryLimits,
+): Promise<Record<string, unknown>[]> {
   // Validate all table names in JOINs
   for (const join of statement.joins!) {
     if (!schema.tables || !(join.table in schema.tables)) {
@@ -245,14 +277,14 @@ async function executeSelectWithJoin(
       statement.from,
       statement.fromIndex,
       statement.where,
-      schema
+      schema,
     );
   }
 
   // Always apply WHERE filter to ensure correctness
   if (statement.where) {
     leftQuery = leftQuery.filter((q) =>
-      buildFilterExpression(q, statement.where!, statement.from)
+      buildFilterExpression(q, statement.where!, statement.from),
     );
   }
 
@@ -260,14 +292,20 @@ async function executeSelectWithJoin(
   let leftResults;
   try {
     leftResults = await leftQuery.collect();
-  } catch (error: any) {
-    if (error.message && error.message.includes("does not exist")) {
+  } catch (error: unknown) {
+    if (
+      error instanceof Error &&
+      error.message &&
+      error.message.includes("does not exist")
+    ) {
       throw new Error(`Table '${statement.from}' does not exist`);
     }
     throw error;
   }
 
-  console.log(`[SQL] Left table (${statement.from}): ${leftResults.length} rows`);
+  console.log(
+    `[SQL] Left table (${statement.from}): ${leftResults.length} rows`,
+  );
 
   // 2. For each JOIN, fetch and merge data
   for (const join of statement.joins!) {
@@ -277,18 +315,24 @@ async function executeSelectWithJoin(
       join,
       statement.from,
       statement.where,
-      schema
+      schema,
     );
   }
 
   // 3. Apply GROUP BY if present
   if (statement.groupBy && statement.groupBy.length > 0) {
     const grouped = applyGroupBy(leftResults, statement);
-    const ordered = statement.orderBy ? applyOrderBy(grouped, statement.orderBy) : grouped;
-    const limited = statement.limit ? ordered.slice(0, statement.limit) : ordered;
+    const ordered = statement.orderBy
+      ? applyOrderBy(grouped, statement.orderBy)
+      : grouped;
+    const limited = statement.limit
+      ? ordered.slice(0, statement.limit)
+      : ordered;
 
     // Enforce maximum result size
-    return limited.length > limits.maxRows ? limited.slice(0, limits.maxRows) : limited;
+    return limited.length > limits.maxRows
+      ? limited.slice(0, limits.maxRows)
+      : limited;
   }
 
   // 4. Apply column projection
@@ -296,17 +340,21 @@ async function executeSelectWithJoin(
     leftResults,
     statement.columns,
     statement.from,
-    statement.joins
+    statement.joins,
   );
 
   // 5. Apply ORDER BY
-  const ordered = statement.orderBy ? applyOrderBy(projected, statement.orderBy) : projected;
+  const ordered = statement.orderBy
+    ? applyOrderBy(projected, statement.orderBy)
+    : projected;
 
   // 6. Apply LIMIT
   const limited = statement.limit ? ordered.slice(0, statement.limit) : ordered;
 
   // 7. Enforce maximum result size
-  return limited.length > limits.maxRows ? limited.slice(0, limits.maxRows) : limited;
+  return limited.length > limits.maxRows
+    ? limited.slice(0, limits.maxRows)
+    : limited;
 }
 
 /**
@@ -314,12 +362,12 @@ async function executeSelectWithJoin(
  */
 async function performJoin(
   ctx: DatabaseContext,
-  leftResults: any[],
+  leftResults: Record<string, unknown>[],
   join: JoinClause,
   fromTable: string,
   globalWhereClause: WhereClause | undefined,
-  schema: SchemaInfo
-): Promise<any[]> {
+  schema: SchemaInfo,
+): Promise<Record<string, unknown>[]> {
   let rightQuery = ctx.query(join.table);
 
   // Apply index hint on the right table if provided
@@ -330,9 +378,9 @@ async function performJoin(
         join.table,
         join.index,
         globalWhereClause,
-        schema
+        schema,
       );
-    } catch (_e) {
+    } catch {
       // If index application fails, fall back silently
     }
   }
@@ -340,7 +388,7 @@ async function performJoin(
   // Apply any WHERE conditions that apply to this joined table
   if (globalWhereClause) {
     rightQuery = rightQuery.filter((q) =>
-      buildFilterExpression(q, globalWhereClause, join.table)
+      buildFilterExpression(q, globalWhereClause, join.table),
     );
   }
 
@@ -348,8 +396,12 @@ async function performJoin(
   let rightResults;
   try {
     rightResults = await rightQuery.collect();
-  } catch (error: any) {
-    if (error.message && error.message.includes("does not exist")) {
+  } catch (error: unknown) {
+    if (
+      error instanceof Error &&
+      error.message &&
+      error.message.includes("does not exist")
+    ) {
       throw new Error(`Table '${join.table}' does not exist`);
     }
     throw error;
@@ -361,11 +413,11 @@ async function performJoin(
   const onConditions = Array.isArray(join.on) ? join.on : [join.on];
 
   // For single-condition fast path
-  let singleMap: Map<any, any[]> | null = null;
+  let singleMap: Map<unknown, Record<string, unknown>[]> | null = null;
   if (onConditions.length === 1) {
     const cond = onConditions[0];
     if (cond.rightTable === join.table) {
-      singleMap = new Map<any, any[]>();
+      singleMap = new Map<unknown, Record<string, unknown>[]>();
       for (const rightRow of rightResults) {
         const key = rightRow[cond.rightField];
         if (!singleMap.has(key)) singleMap.set(key, []);
@@ -375,16 +427,16 @@ async function performJoin(
   }
 
   // Perform INNER JOIN in memory
-  const joined: any[] = [];
+  const joined: Record<string, unknown>[] = [];
 
   function getValue(
-    leftRow: any,
-    rightRow: any,
+    leftRow: Record<string, unknown>,
+    rightRow: Record<string, unknown> | null,
     table: string,
-    field: string
-  ): any {
+    field: string,
+  ): unknown {
     if (table === join.table) {
-      return rightRow[field];
+      return rightRow ? rightRow[field] : undefined;
     }
     const prefixedKey = `${table}.${field}`;
     if (prefixedKey in leftRow) return leftRow[prefixedKey];
@@ -393,7 +445,7 @@ async function performJoin(
   }
 
   for (const leftRow of leftResults) {
-    let candidates: any[] = rightResults;
+    let candidates: Record<string, unknown>[] = rightResults;
 
     if (singleMap) {
       const cond = onConditions[0];
@@ -406,8 +458,18 @@ async function performJoin(
       // Verify all ON conditions
       let matches = true;
       for (const cond of onConditions) {
-        const leftVal = getValue(leftRow, rightRow, cond.leftTable, cond.leftField);
-        const rightVal = getValue(leftRow, rightRow, cond.rightTable, cond.rightField);
+        const leftVal = getValue(
+          leftRow,
+          rightRow,
+          cond.leftTable,
+          cond.leftField,
+        );
+        const rightVal = getValue(
+          leftRow,
+          rightRow,
+          cond.rightTable,
+          cond.rightField,
+        );
         if (leftVal !== rightVal) {
           matches = false;
           break;
@@ -416,7 +478,7 @@ async function performJoin(
       if (!matches) continue;
 
       // Merge rows with table prefixes
-      const mergedRow: any = {};
+      const mergedRow: Record<string, unknown> = {};
 
       for (const [key, value] of Object.entries(leftRow)) {
         if (key.includes(".")) {
@@ -441,12 +503,12 @@ async function performJoin(
  * Apply index to query with WHERE conditions
  */
 function applyIndex(
-  query: any,
+  query: QueryBuilder,
   tableName: string,
   indexName: string,
   whereClause: WhereClause | undefined,
-  schema: SchemaInfo
-): any {
+  schema: SchemaInfo,
+): QueryBuilder {
   const tableIndexes = schema.tables[tableName]?.indexes;
 
   if (!tableIndexes) {
@@ -457,7 +519,7 @@ function applyIndex(
   if (!indexColumns) {
     throw new Error(
       `Index '${indexName}' not found for table '${tableName}'. ` +
-        `Available indexes: ${Object.keys(tableIndexes).join(", ")}`
+        `Available indexes: ${Object.keys(tableIndexes).join(", ")}`,
     );
   }
 
@@ -473,12 +535,12 @@ function applyIndex(
 function buildIndexFilter(
   whereClause: WhereClause | undefined,
   indexColumns: string[],
-  tableName: string
-): (q: any) => any {
-  return (q: any) => {
+  tableName: string,
+): (q: IndexFilterBuilder) => IndexFilterBuilder {
+  return (q: IndexFilterBuilder): IndexFilterBuilder => {
     if (!whereClause) {
       throw new Error(
-        `Index '${indexColumns.join("_and_")}' requires WHERE conditions on columns: ${indexColumns.join(", ")}`
+        `Index '${indexColumns.join("_and_")}' requires WHERE conditions on columns: ${indexColumns.join(", ")}`,
       );
     }
 
@@ -495,7 +557,7 @@ function buildIndexFilter(
           continue;
         } else {
           throw new Error(
-            `Index '${indexColumns.join("_and_")}' requires WHERE condition on column '${column}' (prefix column)`
+            `Index '${indexColumns.join("_and_")}' requires WHERE condition on column '${column}' (prefix column)`,
           );
         }
       }
@@ -507,7 +569,7 @@ function buildIndexFilter(
         case ">":
           if (!isLastColumn) {
             throw new Error(
-              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`,
             );
           }
           filterChain = filterChain.gt(column, condition.value);
@@ -515,7 +577,7 @@ function buildIndexFilter(
         case "<":
           if (!isLastColumn) {
             throw new Error(
-              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`,
             );
           }
           filterChain = filterChain.lt(column, condition.value);
@@ -523,7 +585,7 @@ function buildIndexFilter(
         case ">=":
           if (!isLastColumn) {
             throw new Error(
-              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`,
             );
           }
           filterChain = filterChain.gte(column, condition.value);
@@ -531,14 +593,14 @@ function buildIndexFilter(
         case "<=":
           if (!isLastColumn) {
             throw new Error(
-              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`
+              `Index '${indexColumns.join("_and_")}' only supports range queries on the last column`,
             );
           }
           filterChain = filterChain.lte(column, condition.value);
           break;
         default:
           throw new Error(
-            `Index '${indexColumns.join("_and_")}' does not support operator '${condition.operator}'`
+            `Index '${indexColumns.join("_and_")}' does not support operator '${condition.operator}'`,
           );
       }
     }
@@ -552,7 +614,7 @@ function buildIndexFilter(
  */
 function hasConditionsNotInIndex(
   whereClause: WhereClause,
-  indexedFields: Set<string>
+  indexedFields: Set<string>,
 ): boolean {
   function checkWhere(node: WhereClause): boolean {
     if (node.type === "COMPARISON") {
@@ -573,9 +635,10 @@ function hasConditionsNotInIndex(
  */
 function extractComparisonConditions(
   whereClause: WhereClause,
-  tableName: string
-): Array<{ field: string; operator: string; value: any }> {
-  const conditions: Array<{ field: string; operator: string; value: any }> = [];
+  tableName: string,
+): Array<{ field: string; operator: string; value: unknown }> {
+  const conditions: Array<{ field: string; operator: string; value: unknown }> =
+    [];
 
   function traverseWhere(node: WhereClause): void {
     if (node.type === "COMPARISON") {
@@ -599,7 +662,10 @@ function extractComparisonConditions(
 /**
  * Apply ORDER BY in memory
  */
-function applyOrderBy(results: any[], orderBy: OrderByClause[]): any[] {
+function applyOrderBy(
+  results: Record<string, unknown>[],
+  orderBy: OrderByClause[],
+): Record<string, unknown>[] {
   if (orderBy.length === 0) {
     return results;
   }
@@ -607,8 +673,8 @@ function applyOrderBy(results: any[], orderBy: OrderByClause[]): any[] {
   return results.slice().sort((a, b) => {
     for (const order of orderBy) {
       const key = order.table ? `${order.table}.${order.field}` : order.field;
-      let aVal = a[key] ?? a[order.field];
-      let bVal = b[key] ?? b[order.field];
+      const aVal = a[key] ?? a[order.field];
+      const bVal = b[key] ?? b[order.field];
 
       const aIsNull = aVal === null || aVal === undefined;
       const bIsNull = bVal === null || bVal === undefined;
@@ -637,13 +703,16 @@ function applyOrderBy(results: any[], orderBy: OrderByClause[]): any[] {
 /**
  * Apply GROUP BY with aggregations
  */
-function applyGroupBy(results: any[], statement: SelectStatement): any[] {
+function applyGroupBy(
+  results: Record<string, unknown>[],
+  statement: SelectStatement,
+): Record<string, unknown>[] {
   if (!statement.groupBy || statement.groupBy.length === 0) {
     return results;
   }
 
   // Build groups
-  const groups = new Map<string, any[]>();
+  const groups = new Map<string, Record<string, unknown>[]>();
 
   for (const row of results) {
     const keyParts: Array<string> = [];
@@ -665,10 +734,10 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
   }
 
   // Build result rows for each group
-  const groupedResults: Array<any> = [];
+  const groupedResults: Record<string, unknown>[] = [];
 
-  for (const [groupKey, groupRows] of groups.entries()) {
-    const resultRow: any = {};
+  for (const [, groupRows] of groups.entries()) {
+    const resultRow: Record<string, unknown> = {};
 
     // Add GROUP BY columns
     const groupByColumns: GroupByClause[] = statement.groupBy;
@@ -696,12 +765,12 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
         const isInGroupBy = statement.groupBy.some(
           (g) =>
             g.field === col.name &&
-            (g.table === col.table || (!g.table && !col.table))
+            (g.table === col.table || (!g.table && !col.table)),
         );
 
         if (!isInGroupBy) {
           throw new Error(
-            `Column '${colKey}' must appear in GROUP BY clause or be used in an aggregate function`
+            `Column '${colKey}' must appear in GROUP BY clause or be used in an aggregate function`,
           );
         }
 
@@ -709,7 +778,7 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
         resultRow[outputKey] = resultRow[colKey] ?? groupRows[0][col.name];
       } else if (col.type === "STAR" || col.type === "TABLE_STAR") {
         throw new Error(
-          "SELECT * is not allowed with GROUP BY. Specify columns explicitly."
+          "SELECT * is not allowed with GROUP BY. Specify columns explicitly.",
         );
       }
     }
@@ -721,13 +790,13 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
   let filteredResults = groupedResults;
   if (statement.having) {
     filteredResults = groupedResults.filter((row) =>
-      evaluateHaving(row, statement.having!)
+      evaluateHaving(row, statement.having!),
     );
   }
 
   // Clean up duplicate function keys
   const cleanedResults = filteredResults.map((row) => {
-    const cleanRow: any = {};
+    const cleanRow: Record<string, unknown> = {};
     for (const col of statement.columns) {
       if (col.type === "FUNCTION") {
         const outputKey =
@@ -758,7 +827,10 @@ function applyGroupBy(results: any[], statement: SelectStatement): any[] {
 /**
  * Evaluate HAVING clause
  */
-function evaluateHaving(row: any, having: WhereClause): boolean {
+function evaluateHaving(
+  row: Record<string, unknown>,
+  having: WhereClause,
+): boolean {
   if (having.type === "COMPARISON") {
     const value = row[having.field!];
     const compareValue = having.value;
@@ -772,22 +844,22 @@ function evaluateHaving(row: any, having: WhereClause): boolean {
         if (compareValue === null || compareValue === undefined) {
           return false;
         }
-        return value > compareValue;
+        return (value as number) > (compareValue as number);
       case "<":
         if (compareValue === null || compareValue === undefined) {
           return false;
         }
-        return value < compareValue;
+        return (value as number) < (compareValue as number);
       case ">=":
         if (compareValue === null || compareValue === undefined) {
           return false;
         }
-        return value >= compareValue;
+        return (value as number) >= (compareValue as number);
       case "<=":
         if (compareValue === null || compareValue === undefined) {
           return false;
         }
-        return value <= compareValue;
+        return (value as number) <= (compareValue as number);
       default:
         throw new Error(`Unknown operator: ${having.operator}`);
     }
@@ -808,11 +880,11 @@ function evaluateHaving(row: any, having: WhereClause): boolean {
  * Project columns from results
  */
 function projectColumns(
-  results: any[],
+  results: Record<string, unknown>[],
   columns: ColumnExpression[],
   fromTable: string,
-  joins?: JoinClause[]
-): any[] {
+  joins?: JoinClause[],
+): Record<string, unknown>[] {
   // If only aggregates, compute once
   const hasOnlyFunctions =
     columns.length > 0 && columns.every((c) => c.type === "FUNCTION");
@@ -821,12 +893,12 @@ function projectColumns(
 
   if (hasAnyFunctions && hasAnyPlainColumns) {
     throw new Error(
-      "Mixing aggregates with columns requires GROUP BY (not implemented)"
+      "Mixing aggregates with columns requires GROUP BY (not implemented)",
     );
   }
 
   if (hasOnlyFunctions) {
-    const row: any = {};
+    const row: Record<string, unknown> = {};
     for (const col of columns) {
       const key = col.alias || `${col.name}(${formatFunctionArgs(col.args)})`;
       row[key] = executeFunction(col.name, col.args, null, results);
@@ -845,7 +917,7 @@ function projectColumns(
   // Handle TABLE_STAR
   if (columns.some((col) => col.type === "TABLE_STAR")) {
     return results.map((row) => {
-      const projected: any = {};
+      const projected: Record<string, unknown> = {};
 
       for (const col of columns) {
         if (col.type === "TABLE_STAR") {
@@ -872,7 +944,7 @@ function projectColumns(
 
   // Project specific columns
   return results.map((row) => {
-    const projected: any = {};
+    const projected: Record<string, unknown> = {};
 
     for (const col of columns) {
       if (col.type === "COLUMN") {
@@ -893,9 +965,9 @@ function projectColumns(
  * Build filter expression for WHERE clause
  */
 function buildFilterExpression(
-  q: any,
+  q: FilterBuilder,
   where: WhereClause,
-  currentTable: string
+  currentTable: string,
 ): boolean {
   if (where.type === "COMPARISON") {
     if (where.table && where.table !== currentTable) {
@@ -924,12 +996,12 @@ function buildFilterExpression(
   } else if (where.type === "AND") {
     return q.and(
       buildFilterExpression(q, where.left!, currentTable),
-      buildFilterExpression(q, where.right!, currentTable)
+      buildFilterExpression(q, where.right!, currentTable),
     );
   } else if (where.type === "OR") {
     return q.or(
       buildFilterExpression(q, where.left!, currentTable),
-      buildFilterExpression(q, where.right!, currentTable)
+      buildFilterExpression(q, where.right!, currentTable),
     );
   }
 
@@ -964,9 +1036,9 @@ function formatFunctionArgs(args: ColumnExpression[]): string {
 function executeFunction(
   name: string,
   args: ColumnExpression[],
-  row: any,
-  allResults: any[]
-): any {
+  row: Record<string, unknown> | null,
+  allResults: Record<string, unknown>[],
+): unknown {
   switch (name) {
     case "COUNT":
       if (args.length === 1 && args[0].type === "STAR") {
@@ -974,7 +1046,9 @@ function executeFunction(
       }
       const countArg = args[0];
       if (countArg && countArg.type === "COLUMN") {
-        const key = countArg.table ? `${countArg.table}.${countArg.name}` : countArg.name;
+        const key = countArg.table
+          ? `${countArg.table}.${countArg.name}`
+          : countArg.name;
         return allResults.filter((r) => r[key] !== null && r[key] !== undefined)
           .length;
       }
